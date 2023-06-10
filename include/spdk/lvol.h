@@ -37,8 +37,8 @@ enum lvs_clear_method {
 };
 
 /* Must include null terminator. */
-#define SPDK_LVS_NAME_MAX	64
-#define SPDK_LVOL_NAME_MAX	64
+#define SPDK_LVS_NAME_MAX	256
+#define SPDK_LVOL_NAME_MAX	256
 
 /**
  * Parameters for lvolstore initialization.
@@ -73,7 +73,7 @@ struct spdk_lvs_opts {
 	/** Metadata page size */
 	uint32_t                md_page_size;
 } __attribute__((packed));
-SPDK_STATIC_ASSERT(sizeof(struct spdk_lvs_opts) == 92, "Incorrect size");
+SPDK_STATIC_ASSERT(sizeof(struct spdk_lvs_opts) == 284, "Incorrect size");
 
 /**
  * Initialize an spdk_lvs_opts structure to the defaults.
