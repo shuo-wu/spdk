@@ -106,6 +106,18 @@ def add_parser(subparsers):
     p.add_argument('clone_name', help='lvol clone name')
     p.set_defaults(func=bdev_lvol_clone_bdev)
 
+    def bdev_lvol_set_xattr(args):
+        args.client.bdev_lvol_set_xattr(
+                                     name=args.name,
+                                     xattr_name=args.xattr_name,
+                                     xattr_value=args.xattr_value)
+
+    p = subparsers.add_parser('bdev_lvol_set_xattr', help='Set xattr for lvol bdev')
+    p.add_argument('name', help='lvol bdev name')
+    p.add_argument('xattr_name', help='xattr name')
+    p.add_argument('xattr_value', help='xattr value')
+    p.set_defaults(func=bdev_lvol_set_xattr)
+
     def bdev_lvol_rename(args):
         args.client.bdev_lvol_rename(
                                   old_name=args.old_name,
