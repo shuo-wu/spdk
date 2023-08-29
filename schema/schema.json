@@ -4829,6 +4829,23 @@
       ]
     },
     {
+      "name": "bdev_lvol_get_xattr",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "lvol bdev name"
+        },
+        {
+          "name": "xattr_name",
+          "type": "string",
+          "required": true,
+          "description": "Xattr name"
+        }
+      ]
+    },
+    {
       "name": "bdev_lvol_rename",
       "params": [
         {
