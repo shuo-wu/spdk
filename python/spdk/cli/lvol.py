@@ -193,6 +193,18 @@ def add_parser(subparsers):
     p.add_argument('parent_name', help='parent external snapshot name')
     p.set_defaults(func=bdev_lvol_set_parent_bdev)
 
+    def bdev_lvol_get_fragmap(args):
+        print_json(args.client.bdev_lvol_get_fragmap(
+                                                  name=args.name,
+                                                  offset=args.offset,
+                                                  size=args.size))
+    p = subparsers.add_parser('bdev_lvol_get_fragmap', help="""Get a fragmap for a specific segment of a logical volume using
+                                                            the provided offset and size.""")
+    p.add_argument('name', help='lvol bdev name')
+    p.add_argument('--offset', help='offset in bytes of the specific segment of the logical volume', type=int, required=False)
+    p.add_argument('--size', help='size in bytes of the specific segment of the logical volume', type=int, required=False)
+    p.set_defaults(func=bdev_lvol_get_fragmap)
+
     def bdev_lvol_delete_lvstore(args):
         args.client.bdev_lvol_delete_lvstore(
                                           uuid=args.uuid,

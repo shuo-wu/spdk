@@ -302,6 +302,26 @@ def bdev_lvol_set_parent_bdev(client, lvol_name, parent_name):
 
 
 @deprecated_method
+def bdev_lvol_get_fragmap(client, name, offset=0, size=0):
+    """Get a fragmap for a specific segment of a logical volume using the provided offset and size
+
+    Args:
+        name: lvol bdev name
+        offset: offset in bytes of the specific segment of the logical volume
+        size: size in bytes of the specific segment of the logical volume
+    """
+    params = {
+        'name': name,
+    }
+    if offset:
+        params['offset'] = offset
+    if size:
+        params['size'] = size
+
+    return client.call('bdev_lvol_get_fragmap', params)
+
+
+@deprecated_method
 def bdev_lvol_delete_lvstore(client, uuid=None, lvs_name=None):
     """Destroy a logical volume store.
 
