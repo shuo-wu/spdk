@@ -4762,6 +4762,12 @@
           "type": "string",
           "required": true,
           "description": "Name for the newly created snapshot"
+        },
+        {
+          "name": "xattrs",
+          "type": "array",
+          "required": false,
+          "description": "a map of xattr keys to values"
         }
       ]
     },

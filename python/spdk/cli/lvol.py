@@ -74,13 +74,24 @@ def add_parser(subparsers):
     p.set_defaults(func=bdev_lvol_create)
 
     def bdev_lvol_snapshot(args):
+        xattrs = None
+        if args.xattr:
+            xattrs = {}
+            for entry in args.xattr:
+                parts = entry.split('=', 1)
+                if len(parts) != 2:
+                    raise Exception('--xattr %s not in key=value format' % entry)
+                xattrs[parts[0]] = parts[1]
         print_json(args.client.bdev_lvol_snapshot(
                                                lvol_name=args.lvol_name,
-                                               snapshot_name=args.snapshot_name))
+                                               snapshot_name=args.snapshot_name,
+                                               xattrs=xattrs))
 
     p = subparsers.add_parser('bdev_lvol_snapshot', help='Create a snapshot of an lvol bdev')
     p.add_argument('lvol_name', help='lvol bdev name')
     p.add_argument('snapshot_name', help='lvol snapshot name')
+    p.add_argument('--xattr', action='append', metavar='key=value',
+                   help="adds a key=value xattr to the snapshot")
     p.set_defaults(func=bdev_lvol_snapshot)
 
     def bdev_lvol_clone(args):
