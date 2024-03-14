@@ -5071,6 +5071,23 @@
       ]
     },
     {
+      "name": "bdev_raid_grow_base_bdev",
+      "params": [
+        {
+          "name": "raid_name",
+          "type": "string",
+          "required": true,
+          "description": "Raid bdev name"
+        },
+        {
+          "name": "base_name",
+          "type": "string",
+          "required": true,
+          "description": "Base bdev name"
+        }
+      ]
+    },
+    {
       "name": "bdev_split_create",
       "params": [
         {

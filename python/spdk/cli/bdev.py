@@ -1226,6 +1226,15 @@ def add_parser(subparsers):
     p.add_argument('name', help='base bdev name')
     p.set_defaults(func=bdev_raid_remove_base_bdev)
 
+    def bdev_raid_grow_base_bdev(args):
+        args.client.bdev_raid_grow_base_bdev(raid_name=args.raid_name,
+                                             base_name=args.base_name)
+    p = subparsers.add_parser('bdev_raid_grow_base_bdev', help="""Add a base bdev to a raid bdev,
+                              growing the raid\'s size if there isn't an empty base bdev slot""")
+    p.add_argument('raid_name', help='raid bdev name')
+    p.add_argument('base_name', help='base bdev name')
+    p.set_defaults(func=bdev_raid_grow_base_bdev)
+
     # split
     def bdev_split_create(args):
         print_array(args.client.bdev_split_create(
