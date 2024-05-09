@@ -5157,6 +5157,39 @@
       ]
     },
     {
+      "name": "bdev_raid_get_base_bdev_delta_bitmap",
+      "params": [
+        {
+          "name": "base_bdev_name",
+          "type": "string",
+          "required": true,
+          "description": "Base bdev name in RAID"
+        }
+      ]
+    },
+    {
+      "name": "bdev_raid_stop_base_bdev_delta_bitmap",
+      "params": [
+        {
+          "name": "base_bdev_name",
+          "type": "string",
+          "required": true,
+          "description": "Base bdev name in RAID"
+        }
+      ]
+    },
+    {
+      "name": "bdev_raid_clear_base_bdev_faulty_state",
+      "params": [
+        {
+          "name": "base_bdev_name",
+          "type": "string",
+          "required": true,
+          "description": "Base bdev name in RAID"
+        }
+      ]
+    },
+    {
       "name": "bdev_split_create",
       "params": [
         {
