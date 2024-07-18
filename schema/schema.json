@@ -5032,6 +5032,28 @@
       ]
     },
     {
+      "name": "bdev_lvol_register_snapshot_checksum",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "UUID or alias of the snapshot"
+        }
+      ]
+    },
+    {
+      "name": "bdev_lvol_get_snapshot_checksum",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "UUID or alias of the snapshot"
+        }
+      ]
+    },
+    {
       "name": "bdev_raid_set_options",
       "params": [
         {

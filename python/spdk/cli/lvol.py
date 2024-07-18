@@ -238,6 +238,22 @@ def add_parser(subparsers):
     p.add_argument('--size', help='size in bytes of the specific segment of the logical volume', type=int, required=False)
     p.set_defaults(func=bdev_lvol_get_fragmap)
 
+    def bdev_lvol_register_snapshot_checksum(args):
+        args.client.bdev_lvol_register_snapshot_checksum(
+                                                      name=args.name)
+
+    p = subparsers.add_parser('bdev_lvol_register_snapshot_checksum', help='Compute and store snapshot\'s checksum')
+    p.add_argument('name', help='snapshot bdev name')
+    p.set_defaults(func=bdev_lvol_register_snapshot_checksum)
+
+    def bdev_lvol_get_snapshot_checksum(args):
+        print_json(args.client.bdev_lvol_get_snapshot_checksum(
+                                                            name=args.name))
+
+    p = subparsers.add_parser('bdev_lvol_get_snapshot_checksum', help='Get snapshot\'s stored checksum')
+    p.add_argument('name', help='snapshot bdev name')
+    p.set_defaults(func=bdev_lvol_get_snapshot_checksum)
+
     def bdev_lvol_delete_lvstore(args):
         args.client.bdev_lvol_delete_lvstore(
                                           uuid=args.uuid,
