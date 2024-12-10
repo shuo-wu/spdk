@@ -2211,12 +2211,6 @@ blob_xattr(void)
 	size_t value_len;
 	struct spdk_xattr_names *names;
 
-	/* Test that set_xattr fails if md_ro flag is set. */
-	blob->md_ro = true;
-	rc = spdk_blob_set_xattr(blob, "name", "log.txt", strlen("log.txt") + 1);
-	CU_ASSERT(rc == -EPERM);
-
-	blob->md_ro = false;
 	rc = spdk_blob_set_xattr(blob, "name", "log.txt", strlen("log.txt") + 1);
 	CU_ASSERT(rc == 0);
 
@@ -2256,11 +2250,6 @@ blob_xattr(void)
 	CU_ASSERT(strcmp(name1, name2));
 	spdk_xattr_names_free(names);
 
-	/* Confirm that remove_xattr fails if md_ro is set to true. */
-	blob->md_ro = true;
-	rc = spdk_blob_remove_xattr(blob, "name");
-	CU_ASSERT(rc == -EPERM);
-
 	blob->md_ro = false;
 	rc = spdk_blob_remove_xattr(blob, "name");
 	CU_ASSERT(rc == 0);
@@ -2269,6 +2258,13 @@ blob_xattr(void)
 	CU_ASSERT(rc == -ENOENT);
 
 	/* Set internal xattr */
+
+	/* test that set_xattr fails for internal xattr if md_ro flag is set. */
+	blob->md_ro = true;
+	rc = blob_set_xattr(blob, "internal", &length, sizeof(length), true);
+	CU_ASSERT(rc == -EPERM);
+
+	blob->md_ro = false;
 	length = 7898;
 	rc = blob_set_xattr(blob, "internal", &length, sizeof(length), true);
 	CU_ASSERT(rc == 0);
@@ -2304,6 +2300,12 @@ blob_xattr(void)
 	rc = spdk_blob_get_xattr_value(blob, "internal", &value, &value_len);
 	CU_ASSERT(rc != 0);
 
+	/* Confirm that remove_xattr fails for internal xattr if md_ro is set to true. */
+	blob->md_ro = true;
+	rc = blob_remove_xattr(blob, "internal", true);
+	CU_ASSERT(rc == -EPERM);
+
+	blob->md_ro = false;
 	rc = blob_remove_xattr(blob, "internal", true);
 	CU_ASSERT(rc == 0);
 
