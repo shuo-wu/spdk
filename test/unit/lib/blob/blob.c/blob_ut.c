@@ -1076,7 +1076,7 @@ blob_clone(void)
 }
 
 static void
-_blob_inflate(bool decouple_parent)
+_blob_inflate(enum blob_inflate_type allocate_type)
 {
 	struct spdk_blob_store *bs = g_bs;
 	struct spdk_blob_opts opts;
@@ -1101,18 +1101,23 @@ _blob_inflate(bool decouple_parent)
 	CU_ASSERT(spdk_blob_get_num_allocated_clusters(blob) == 0);
 
 	/* 1) Blob with no parent */
-	if (decouple_parent) {
+	if (allocate_type == BLOB_INFLATE_ALLOCATE_UNALLOCATED) {
 		/* Decouple parent of blob with no parent (should fail) */
 		spdk_bs_blob_decouple_parent(bs, channel, blobid, blob_op_complete, NULL);
 		poll_threads();
 		CU_ASSERT(g_bserrno != 0);
-	} else {
+	} else if (allocate_type == BLOB_INFLATE_ALLOCATE_ALL) {
 		/* Inflate of thin blob with no parent should made it thick */
 		spdk_bs_inflate_blob(bs, channel, blobid, blob_op_complete, NULL);
 		poll_threads();
 		CU_ASSERT(g_bserrno == 0);
 		CU_ASSERT(spdk_blob_is_thin_provisioned(blob) == false);
 		CU_ASSERT(spdk_blob_get_num_allocated_clusters(blob) == 10);
+	} else {
+		/* Detach parent of blob with no parent (should fail) */
+		spdk_bs_blob_detach_parent(bs, blobid, blob_op_complete, NULL);
+		poll_threads();
+		CU_ASSERT(g_bserrno != 0);
 	}
 
 	spdk_bs_create_snapshot(bs, blobid, NULL, blob_op_with_id_complete, NULL);
@@ -1140,7 +1145,7 @@ _blob_inflate(bool decouple_parent)
 	free_clusters = spdk_bs_free_cluster_count(bs);
 
 	/* 2) Blob with parent */
-	if (!decouple_parent) {
+	if (allocate_type == BLOB_INFLATE_ALLOCATE_ALL) {
 		/* Do full blob inflation */
 		spdk_bs_inflate_blob(bs, channel, blobid, blob_op_complete, NULL);
 		poll_threads();
@@ -1148,9 +1153,17 @@ _blob_inflate(bool decouple_parent)
 		/* all 10 clusters should be allocated */
 		CU_ASSERT(spdk_bs_free_cluster_count(bs) == free_clusters - 10);
 		CU_ASSERT(spdk_blob_get_num_allocated_clusters(blob) == 10);
-	} else {
+	} else if (allocate_type == BLOB_INFLATE_ALLOCATE_UNALLOCATED) {
 		/* Decouple parent of blob */
 		spdk_bs_blob_decouple_parent(bs, channel, blobid, blob_op_complete, NULL);
+		poll_threads();
+		CU_ASSERT(g_bserrno == 0);
+		/* when only parent is removed, none of the clusters should be allocated */
+		CU_ASSERT(spdk_bs_free_cluster_count(bs) == free_clusters);
+		CU_ASSERT(spdk_blob_get_num_allocated_clusters(blob) == 0);
+	} else {
+		/* Detach parent of blob */
+		spdk_bs_blob_detach_parent(bs, blobid, blob_op_complete, NULL);
 		poll_threads();
 		CU_ASSERT(g_bserrno == 0);
 		/* when only parent is removed, none of the clusters should be allocated */
@@ -1164,7 +1177,7 @@ _blob_inflate(bool decouple_parent)
 	CU_ASSERT(g_bserrno == 0);
 
 	CU_ASSERT(spdk_blob_get_num_clusters(blob) == 10);
-	CU_ASSERT(spdk_blob_is_thin_provisioned(blob) == decouple_parent);
+	CU_ASSERT(spdk_blob_is_thin_provisioned(blob) == (allocate_type != BLOB_INFLATE_ALLOCATE_ALL));
 
 	spdk_bs_free_io_channel(channel);
 	poll_threads();
@@ -1175,8 +1188,9 @@ _blob_inflate(bool decouple_parent)
 static void
 blob_inflate(void)
 {
-	_blob_inflate(false);
-	_blob_inflate(true);
+	_blob_inflate(BLOB_INFLATE_ALLOCATE_UNALLOCATED);
+	_blob_inflate(BLOB_INFLATE_ALLOCATE_ALL);
+	_blob_inflate(BLOB_INFLATE_ALLOCATE_NONE);
 }
 
 static void
@@ -5505,7 +5519,7 @@ blob_snapshot_rw_iov(void)
 }
 
 /**
- * Inflate / decouple parent rw unit tests.
+ * Inflate / decouple parent / detach parent rw unit tests.
  *
  * --------------
  * original blob:         0         1         2         3         4
@@ -5537,9 +5551,21 @@ blob_snapshot_rw_iov(void)
  *         NOTE: needs to allocate 1 cluster, 3 clusters unallocated, dependency
  *               on snapshot2 removed and on snapshot still exists. Snapshot2
  *               should remain a clone of snapshot.
+ *
+ * ----------------  .         .         .         .         .         .
+ * detach parent:  .         .         .         .         .         .
+ *                   ,---------+---------+---------+---------+---------.
+ *         snapshot  |xxxxxxxxx|xxxxxxxxx|xxxxxxxxx|xxxxxxxxx|    -    |
+ *                   +---------+---------+---------+---------+---------+
+ *         blob      |    -    |zzzzzzzzz|    -    |    -    |    -    |
+ *                   '---------+---------+---------+---------+---------'
+ *
+ *         NOTE: no need to allocate clusters, 4 clusters unallocated, dependency
+ *               on snapshot2 removed and on snapshot still exists. Snapshot2
+ *               should remain a clone of snapshot.
  */
 static void
-_blob_inflate_rw(bool decouple_parent)
+_blob_inflate_rw(enum blob_inflate_type allocate_type)
 {
 	struct spdk_blob_store *bs = g_bs;
 	struct spdk_blob *blob, *snapshot, *snapshot2;
@@ -5724,7 +5750,7 @@ _blob_inflate_rw(bool decouple_parent)
 	CU_ASSERT(spdk_blob_get_parent_snapshot(bs, blobid) == snapshot2id);
 
 	free_clusters = spdk_bs_free_cluster_count(bs);
-	if (!decouple_parent) {
+	if (allocate_type == BLOB_INFLATE_ALLOCATE_ALL) {
 		/* Do full blob inflation */
 		spdk_bs_inflate_blob(bs, channel, blobid, blob_op_complete, NULL);
 		poll_threads();
@@ -5748,7 +5774,7 @@ _blob_inflate_rw(bool decouple_parent)
 		CU_ASSERT(count == 0);
 
 		CU_ASSERT(spdk_blob_get_parent_snapshot(bs, blobid) == SPDK_BLOBID_INVALID);
-	} else {
+	} else if (allocate_type == BLOB_INFLATE_ALLOCATE_UNALLOCATED) {
 		/* Decouple parent of blob */
 		spdk_bs_blob_decouple_parent(bs, channel, blobid, blob_op_complete, NULL);
 		poll_threads();
@@ -5758,6 +5784,30 @@ _blob_inflate_rw(bool decouple_parent)
 		 * is covered by a cluster written on a top level blob, and
 		 * already allocated) */
 		CU_ASSERT(spdk_bs_free_cluster_count(bs) == free_clusters - 1);
+
+		/* Check if relation tree updated correctly */
+		count = 2;
+		CU_ASSERT(spdk_blob_get_clones(bs, snapshotid, ids, &count) == 0);
+
+		/* snapshotid have two clones now */
+		CU_ASSERT(count == 2);
+		CU_ASSERT(ids[0] == blobid || ids[1] == blobid);
+		CU_ASSERT(ids[0] == snapshot2id || ids[1] == snapshot2id);
+
+		/* snapshot2id have no clones */
+		count = 2;
+		CU_ASSERT(spdk_blob_get_clones(bs, snapshot2id, ids, &count) == 0);
+		CU_ASSERT(count == 0);
+
+		CU_ASSERT(spdk_blob_get_parent_snapshot(bs, blobid) == snapshotid);
+	} else {
+		/* Detach parent of blob */
+		spdk_bs_blob_detach_parent(bs, blobid, blob_op_complete, NULL);
+		poll_threads();
+		CU_ASSERT(g_bserrno == 0);
+
+		/* No cluster from a parent should be inflated */
+		CU_ASSERT(spdk_bs_free_cluster_count(bs) == free_clusters);
 
 		/* Check if relation tree updated correctly */
 		count = 2;
@@ -5795,13 +5845,22 @@ _blob_inflate_rw(bool decouple_parent)
 
 	CU_ASSERT(spdk_blob_get_num_clusters(blob) == 5);
 
-	/* Check data consistency on inflated blob */
+	/* Check data consistency on inflated/decoupled or detached blob */
 	memset(payload_read, 0xFF, payload_size);
 	spdk_blob_io_read(blob, channel, payload_read, 0, io_units_per_payload,
 			  blob_op_complete, NULL);
 	poll_threads();
 	CU_ASSERT(g_bserrno == 0);
-	CU_ASSERT(memcmp(payload_clone, payload_read, payload_size) == 0);
+	if (allocate_type != BLOB_INFLATE_ALLOCATE_NONE) {
+		CU_ASSERT(memcmp(payload_clone, payload_read, payload_size) == 0);
+	} else {
+		CU_ASSERT(memcmp(payload_clone, payload_read, cluster_size * 3) == 0);
+		/* Blob's 4th clsuter is not allocated, because the detachment from its parent doesn't copy any data,
+		 * so we read 0xE5 from snapshot. We can find this data pattern at the beginning of payload_clone. */
+		CU_ASSERT(memcmp(payload_clone, payload_read + cluster_size * 3, cluster_size) == 0);
+		CU_ASSERT(memcmp(payload_clone + cluster_size * 4, payload_read + cluster_size * 4,
+				 cluster_size) == 0);
+	}
 
 	spdk_bs_free_io_channel(channel);
 	poll_threads();
@@ -5816,8 +5875,9 @@ _blob_inflate_rw(bool decouple_parent)
 static void
 blob_inflate_rw(void)
 {
-	_blob_inflate_rw(false);
-	_blob_inflate_rw(true);
+	_blob_inflate_rw(BLOB_INFLATE_ALLOCATE_ALL);
+	_blob_inflate_rw(BLOB_INFLATE_ALLOCATE_UNALLOCATED);
+	_blob_inflate_rw(BLOB_INFLATE_ALLOCATE_NONE);
 }
 
 static void
@@ -9117,7 +9177,7 @@ blob_esnap_clone_snapshot(void)
 }
 
 static uint64_t
-_blob_esnap_clone_hydrate(bool inflate)
+_blob_esnap_clone_hydrate(enum blob_inflate_type allocate_type)
 {
 	struct spdk_blob_store	*bs = g_bs;
 	struct spdk_blob_opts	opts;
@@ -9157,18 +9217,26 @@ _blob_esnap_clone_hydrate(bool inflate)
 	UT_ASSERT_IS_ESNAP_CLONE(blob, &esnap_opts, sizeof(esnap_opts));
 
 	/*
-	 * Inflate or decouple  the blob then verify that it is no longer an esnap clone and has
-	 * right content
+	 * Inflate, decouple or detach the blob then verify that it is no longer an esnap clone and,
+	 * if needed, has right content
 	 */
-	if (inflate) {
+	if (allocate_type == BLOB_INFLATE_ALLOCATE_ALL) {
 		spdk_bs_inflate_blob(bs, channel, blobid, blob_op_complete, NULL);
-	} else {
+	} else if (allocate_type == BLOB_INFLATE_ALLOCATE_UNALLOCATED) {
 		spdk_bs_blob_decouple_parent(bs, channel, blobid, blob_op_complete, NULL);
+	} else {
+		spdk_bs_blob_detach_parent(bs, blobid, blob_op_complete, NULL);
 	}
+
 	poll_threads();
-	CU_ASSERT(g_bserrno == 0);
-	UT_ASSERT_IS_NOT_ESNAP_CLONE(blob);
-	CU_ASSERT(blob_esnap_verify_contents(blob, channel, 0, esnap_sz, esnap_sz, "read"));
+
+	if (allocate_type == BLOB_INFLATE_ALLOCATE_NONE) {
+		CU_ASSERT(g_bserrno == -EINVAL);
+	} else {
+		CU_ASSERT(g_bserrno == 0);
+		UT_ASSERT_IS_NOT_ESNAP_CLONE(blob);
+		CU_ASSERT(blob_esnap_verify_contents(blob, channel, 0, esnap_sz, esnap_sz, "read"));
+	}
 	ut_blob_close_and_delete(bs, blob);
 
 	/*
@@ -9184,13 +9252,19 @@ _blob_esnap_clone_hydrate(bool inflate)
 static void
 blob_esnap_clone_inflate(void)
 {
-	_blob_esnap_clone_hydrate(true);
+	_blob_esnap_clone_hydrate(BLOB_INFLATE_ALLOCATE_ALL);
 }
 
 static void
 blob_esnap_clone_decouple(void)
 {
-	_blob_esnap_clone_hydrate(false);
+	_blob_esnap_clone_hydrate(BLOB_INFLATE_ALLOCATE_UNALLOCATED);
+}
+
+static void
+blob_esnap_clone_detach(void)
+{
+	_blob_esnap_clone_hydrate(BLOB_INFLATE_ALLOCATE_NONE);
 }
 
 static void
@@ -10428,6 +10502,7 @@ main(int argc, char **argv)
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_clone_snapshot);
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_clone_inflate);
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_clone_decouple);
+		CU_ADD_TEST(suite_esnap_bs, blob_esnap_clone_detach);
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_clone_reload);
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_hotplug);
 		CU_ADD_TEST(suite_blob, blob_is_degraded);
