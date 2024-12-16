@@ -4930,6 +4930,17 @@
       ]
     },
     {
+      "name": "bdev_lvol_detach_parent",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "UUID or alias of the logical volume to detach the parent of it"
+        }
+      ]
+    },
+    {
       "name": "bdev_lvol_get_lvols",
       "params": [
         {

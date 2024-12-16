@@ -163,6 +163,14 @@ def add_parser(subparsers):
     p.add_argument('name', help='lvol bdev name')
     p.set_defaults(func=bdev_lvol_decouple_parent)
 
+    def bdev_lvol_detach_parent(args):
+        args.client.bdev_lvol_detach_parent(
+                                          name=args.name)
+
+    p = subparsers.add_parser('bdev_lvol_detach_parent', help='Detach parent of lvol')
+    p.add_argument('name', help='lvol bdev name')
+    p.set_defaults(func=bdev_lvol_detach_parent)
+
     def bdev_lvol_resize(args):
         args.client.bdev_lvol_resize(
                                   name=args.name,
