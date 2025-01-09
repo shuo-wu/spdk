@@ -861,7 +861,7 @@ vbdev_lvol_dump_info_json(void *ctx, struct spdk_json_write_ctx *w)
 			if (name != NULL) {
 				spdk_json_write_named_string(w, "base_snapshot", name);
 			} else {
-				SPDK_ERRLOG("Cannot obtain snapshots name\n");
+				SPDK_ERRLOG("Cannot obtain parent snapshots name for lvol %s\n", lvol->name);
 			}
 		}
 	}
