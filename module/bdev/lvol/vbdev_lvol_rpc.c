@@ -2114,7 +2114,7 @@ rpc_bdev_lvol_get_snapshot_checksum(struct spdk_jsonrpc_request *request,
 
 	rc = spdk_lvol_get_snapshot_checksum(lvol, &checksum);
 	if (rc != 0) {
-		SPDK_ERRLOG("Error %d getting snapshot checksum\n", rc);
+		SPDK_INFOLOG(lvol_rpc, "Error %d getting snapshot checksum\n", rc);
 		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
 		goto cleanup;
 	}
