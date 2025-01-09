@@ -7940,6 +7940,9 @@ bs_snapshot_checksum_cleanup_finish(void *cb_arg, int bserrno)
 
 	spdk_free(ctx->read_buff);
 
+	SPDK_DEBUGLOG(ctx->blob, "blob 0x%" PRIx64 " snapshot checksum calculation finished\n",
+			      ctx->blob->id);
+
 	cpl->u.blob_basic.cb_fn(cpl->u.blob_basic.cb_arg, ctx->bserrno);
 
 	free(ctx);
@@ -8051,6 +8054,9 @@ bs_snapshot_checksum_blob_open_cpl(void *cb_arg, struct spdk_blob *_blob, int bs
 		spdk_blob_close(_blob, bs_snapshot_checksum_cleanup_finish, ctx);
 		return;
 	}
+
+	SPDK_DEBUGLOG(blob, "blob 0x%" PRIx64 " snapshot checksum calculation start\n",
+			      _blob->id);
 
 	_blob->locked_operation_in_progress = true;
 
