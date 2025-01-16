@@ -592,11 +592,15 @@ rpc_bdev_raid_remove_base_bdev(struct spdk_jsonrpc_request *request,
 		return;
 	}
 
+	SPDK_INFOLOG(bdev_raid, "rpc_bdev_raid_remove_base_bdev started removing base bdev %s from raid\n", name);
+
 	rc = spdk_bdev_open_ext(name, false, rpc_bdev_raid_event_cb, NULL, &desc);
 	free(name);
 	if (rc != 0) {
 		goto err;
 	}
+
+	SPDK_INFOLOG(bdev_raid, "rpc_bdev_raid_remove_base_bdev opened desc %s\n", spdk_bdev_desc_get_bdev(desc)->name);
 
 	rc = raid_bdev_remove_base_bdev(spdk_bdev_desc_get_bdev(desc), rpc_bdev_raid_remove_base_bdev_done,
 					request);

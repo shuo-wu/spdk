@@ -10029,8 +10029,10 @@ _bdev_lock_lba_range(struct spdk_bdev *bdev, struct spdk_bdev_channel *ch,
 		 * Put it on the pending list until this range no
 		 * longer overlaps with another.
 		 */
+		SPDK_INFOLOG(bdev, "_bdev_lock_lba_range in bdev.c found a range overlapping hence put it on the pending list\n");
 		TAILQ_INSERT_TAIL(&bdev->internal.pending_locked_ranges, &ctx->range, tailq);
 	} else {
+		SPDK_INFOLOG(bdev, "_bdev_lock_lba_range in bdev.c put a range on the locked list\n");
 		TAILQ_INSERT_TAIL(&bdev->internal.locked_ranges, &ctx->range, tailq);
 		bdev_lock_lba_range_ctx(bdev, ctx);
 	}
@@ -10210,6 +10212,8 @@ bdev_unquiesce_range_unlocked(struct lba_range *range, void *ctx, int status)
 {
 	struct bdev_quiesce_ctx *quiesce_ctx = ctx;
 
+	SPDK_INFOLOG(bdev, "bdev_unquiesce_range_unlocked in bdev.c starts, status %d\n", status);
+
 	if (quiesce_ctx->cb_fn != NULL) {
 		quiesce_ctx->cb_fn(quiesce_ctx->cb_arg, status);
 	}
@@ -10222,6 +10226,8 @@ bdev_quiesce_range_locked(struct lba_range *range, void *ctx, int status)
 {
 	struct bdev_quiesce_ctx *quiesce_ctx = ctx;
 	struct spdk_bdev_module *module = range->bdev->module;
+
+	SPDK_INFOLOG(bdev, "bdev_quiesce_range_locked in bdev.c starts, status %d\n", status);
 
 	if (status != 0) {
 		if (quiesce_ctx->cb_fn != NULL) {
@@ -10253,6 +10259,9 @@ _spdk_bdev_quiesce(struct spdk_bdev *bdev, struct spdk_bdev_module *module,
 		   spdk_bdev_quiesce_cb cb_fn, void *cb_arg,
 		   bool unquiesce)
 {
+
+	SPDK_INFOLOG(bdev, "_spdk_bdev_quiesce in bdev.c starts for bdev %s\n", bdev->name);
+
 	struct bdev_quiesce_ctx *quiesce_ctx;
 	int rc;
 
@@ -10267,6 +10276,8 @@ _spdk_bdev_quiesce(struct spdk_bdev *bdev, struct spdk_bdev_module *module,
 
 	if (unquiesce) {
 		struct lba_range *range;
+
+		SPDK_INFOLOG(bdev, "_spdk_bdev_quiesce in bdev.c (unquiesce) will try to guarantee the specified range actually quiesced in the specified module for bdev %s\n", bdev->name);
 
 		/* Make sure the specified range is actually quiesced in the specified module and
 		 * then remove it from the list. Note that the range must match exactly.
@@ -10289,7 +10300,11 @@ _spdk_bdev_quiesce(struct spdk_bdev *bdev, struct spdk_bdev_module *module,
 		quiesce_ctx->cb_fn = cb_fn;
 		quiesce_ctx->cb_arg = cb_arg;
 
+		SPDK_INFOLOG(bdev, "_spdk_bdev_quiesce in bdev.c (unquiesce) will call _bdev_unlock_lba_range for bdev %s\n", bdev->name);
+
 		rc = _bdev_unlock_lba_range(bdev, offset, length, bdev_unquiesce_range_unlocked, quiesce_ctx);
+
+		SPDK_INFOLOG(bdev, "_spdk_bdev_quiesce in bdev.c (unquiesce) called _bdev_unlock_lba_range for bdev %s\n", bdev->name);
 	} else {
 		quiesce_ctx = malloc(sizeof(*quiesce_ctx));
 		if (quiesce_ctx == NULL) {
@@ -10299,10 +10314,14 @@ _spdk_bdev_quiesce(struct spdk_bdev *bdev, struct spdk_bdev_module *module,
 		quiesce_ctx->cb_fn = cb_fn;
 		quiesce_ctx->cb_arg = cb_arg;
 
+		SPDK_INFOLOG(bdev, "_spdk_bdev_quiesce in bdev.c (!unquiesce) will call _bdev_lock_lba_range for bdev %s\n", bdev->name);
+
 		rc = _bdev_lock_lba_range(bdev, NULL, offset, length, bdev_quiesce_range_locked, quiesce_ctx);
 		if (rc != 0) {
 			free(quiesce_ctx);
 		}
+
+		SPDK_INFOLOG(bdev, "_spdk_bdev_quiesce in bdev.c (!unquiesce) called _bdev_lock_lba_range for bdev %s\n", bdev->name);
 	}
 
 	return rc;
@@ -10312,6 +10331,7 @@ int
 spdk_bdev_quiesce(struct spdk_bdev *bdev, struct spdk_bdev_module *module,
 		  spdk_bdev_quiesce_cb cb_fn, void *cb_arg)
 {
+	SPDK_INFOLOG(bdev, "spdk_bdev_quiesce in bdev.c starts for bdev %s\n", bdev->name);
 	return _spdk_bdev_quiesce(bdev, module, 0, bdev->blockcnt, cb_fn, cb_arg, false);
 }
 

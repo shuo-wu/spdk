@@ -2101,6 +2101,8 @@ raid_bdev_remove_base_bdev_write_sb_cb(int status, struct raid_bdev *raid_bdev, 
 {
 	struct raid_base_bdev_info *base_info = ctx;
 
+	SPDK_INFOLOG(bdev_raid, "raid_bdev_remove_base_bdev_write_sb_cb is writing sb for base bdev %s removal from RAID bdev %s\n", base_info->name, raid_bdev->bdev.name);
+
 	if (status != 0) {
 		SPDK_ERRLOG("Failed to write raid bdev '%s' superblock: %s\n",
 			    raid_bdev->bdev.name, spdk_strerror(-status));
@@ -2116,6 +2118,8 @@ raid_bdev_remove_base_bdev_on_quiesced(void *ctx, int status)
 {
 	struct raid_base_bdev_info *base_info = ctx;
 	struct raid_bdev *raid_bdev = base_info->raid_bdev;
+
+	SPDK_INFOLOG(bdev_raid, "raid_bdev_remove_base_bdev_on_quiesced starts removing base bdev %s for RAID bdev %s\n", base_info->name, raid_bdev->bdev.name);
 
 	if (status != 0) {
 		SPDK_ERRLOG("Failed to quiesce raid bdev %s: %s\n",
@@ -2152,6 +2156,8 @@ raid_bdev_remove_base_bdev_on_quiesced(void *ctx, int status)
 static int
 raid_bdev_remove_base_bdev_quiesce(struct raid_base_bdev_info *base_info)
 {
+	SPDK_INFOLOG(bdev_raid, "raid_bdev_remove_base_bdev_quiesce starts removing base bdev %s for RAID bdev %s\n", base_info->name, base_info->raid_bdev->bdev.name);
+	
 	assert(spdk_get_thread() == spdk_thread_get_app_thread());
 
 	return spdk_bdev_quiesce(&base_info->raid_bdev->bdev, &g_raid_if,
@@ -2195,6 +2201,8 @@ _raid_bdev_process_base_bdev_remove(void *_ctx)
 	struct raid_bdev_process *process = ctx->process;
 	int ret;
 
+	SPDK_INFOLOG(bdev_raid, "_raid_bdev_process_base_bdev_remove starts removing base bdev %s for RAID bdev %s with process state %d\n", ctx->base_info->name, process->raid_bdev->bdev.name, process->state);
+
 	if (ctx->base_info != process->target &&
 	    ctx->num_base_bdevs_operational > process->raid_bdev->min_base_bdevs_operational) {
 		/* process doesn't need to be stopped */
@@ -2223,6 +2231,9 @@ static int
 raid_bdev_process_base_bdev_remove(struct raid_bdev_process *process,
 				   struct raid_base_bdev_info *base_info)
 {
+
+	SPDK_INFOLOG(bdev_raid, "raid_bdev_process_base_bdev_remove starts removing base bdev %s for RAID bdev %s with process state %d\n", base_info->name, process->raid_bdev->bdev.name, process->state);
+
 	struct raid_bdev_process_base_bdev_remove_ctx *ctx;
 
 	assert(spdk_get_thread() == spdk_thread_get_app_thread());
@@ -2261,6 +2272,8 @@ _raid_bdev_remove_base_bdev(struct raid_base_bdev_info *base_info,
 {
 	struct raid_bdev *raid_bdev = base_info->raid_bdev;
 	int ret = 0;
+
+	SPDK_INFOLOG(bdev_raid, "_raid_bdev_remove_base_bdev starts removing base bdev %s for RAID bdev %s\n", base_info->name, raid_bdev->bdev.name);
 
 	SPDK_DEBUGLOG(bdev_raid, "%s\n", base_info->name);
 
@@ -2722,6 +2735,8 @@ raid_bdev_remove_base_bdev(struct spdk_bdev *base_bdev, raid_base_bdev_cb cb_fn,
 		return -ENODEV;
 	}
 
+	SPDK_INFOLOG(bdev_raid, "raid_bdev_remove_base_bdev found base bdev %s belonging to RAID bdev %s\n", base_info->name, base_info->raid_bdev->bdev.name);
+
 	return _raid_bdev_remove_base_bdev(base_info, cb_fn, cb_ctx);
 }
 
@@ -2733,6 +2748,8 @@ raid_bdev_start_faulty_state(struct raid_base_bdev_info *base_info)
 	void *cb_ctx = NULL;
 	int rc;
 
+	SPDK_INFOLOG(bdev_raid, "raid_bdev_start_faulty_state started\n");
+	
 	if (base_info->raid_bdev->delta_bitmap_enabled) {
 		ctx = calloc(1, sizeof(*ctx));
 		if (ctx == NULL) {
