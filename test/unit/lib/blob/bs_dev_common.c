@@ -17,6 +17,7 @@
 
 uint8_t *g_dev_buffer;
 uint64_t g_dev_write_bytes;
+uint64_t g_dev_write_zeroes_bytes;
 uint64_t g_dev_read_bytes;
 uint64_t g_dev_copy_bytes;
 bool g_dev_writev_ext_called;
@@ -372,6 +373,7 @@ dev_write_zeroes(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
 		length = lba_count * dev->blocklen;
 		SPDK_CU_ASSERT_FATAL(offset + length <= DEV_BUFFER_SIZE);
 		memset(&g_dev_buffer[offset], 0, length);
+		g_dev_write_zeroes_bytes += length;
 		g_dev_write_bytes += length;
 	} else {
 		g_power_failure_rc = -EIO;
