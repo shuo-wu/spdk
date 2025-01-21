@@ -1379,7 +1379,7 @@ blob_serialize(const struct spdk_blob *blob, struct spdk_blob_md_page **pages,
 	assert(pages != NULL);
 	assert(page_count != NULL);
 	assert(blob != NULL);
-	assert(blob->state == SPDK_BLOB_STATE_DIRTY);
+	assert(blob->state == SPDK_BLOB_STATE_DIRTY || blob->state == SPDK_BLOB_STATE_DIRTY_XATTR);
 
 	*pages = NULL;
 	*page_count = 0;
@@ -9039,7 +9039,7 @@ spdk_blob_sync_md(struct spdk_blob *blob, spdk_blob_op_complete cb_fn, void *cb_
 
 	SPDK_DEBUGLOG(blob, "Syncing blob 0x%" PRIx64 "\n", blob->id);
 
-	if (blob->md_ro) {
+	if (blob->md_ro && blob->state != SPDK_BLOB_STATE_DIRTY_XATTR) {
 		assert(blob->state == SPDK_BLOB_STATE_CLEAN);
 		cb_fn(cb_arg, 0);
 		return;
@@ -9611,7 +9611,7 @@ blob_set_xattr(struct spdk_blob *blob, const char *name, const void *value,
 			xattr->value = tmp;
 			memcpy(xattr->value, value, value_len);
 
-			blob->state = SPDK_BLOB_STATE_DIRTY;
+			blob->state = SPDK_BLOB_STATE_DIRTY_XATTR;
 
 			return 0;
 		}
@@ -9638,7 +9638,7 @@ blob_set_xattr(struct spdk_blob *blob, const char *name, const void *value,
 	memcpy(xattr->value, value, value_len);
 	TAILQ_INSERT_TAIL(xattrs, xattr, link);
 
-	blob->state = SPDK_BLOB_STATE_DIRTY;
+	blob->state = SPDK_BLOB_STATE_DIRTY_XATTR;
 
 	return 0;
 }
