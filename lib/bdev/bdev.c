@@ -3616,8 +3616,10 @@ bdev_io_range_is_locked(struct spdk_bdev_io *bdev_io, struct lba_range *range)
 			 * range, and the caller_ctx is the same as the locked_ctx.  This means
 			 * that this I/O is associated with the lock, and is allowed to execute.
 			 */
+			SPDK_INFOLOG(bdev, "bdev_io_range_is_locked found bdev %s io range offset %" PRIu64 " length %" PRIu64 " is overlapped, which is locked with the same ch and ctx\n", bdev_io->bdev->name, range->offset, range->length);
 			return false;
 		} else {
+			SPDK_INFOLOG(bdev, "bdev_io_range_is_locked found bdev %s io range offset %" PRIu64 " length %" PRIu64 " is overlapped, which is locked with the diff ch or ctx\n", bdev_io->bdev->name, range->offset, range->length);
 			return true;
 		}
 	default:
@@ -9911,6 +9913,8 @@ bdev_lock_lba_range_check_io(void *_i)
 	struct lba_range *range = ctx->current_range;
 	struct spdk_bdev_io *bdev_io;
 
+	SPDK_INFOLOG(bdev, "bdev_lock_lba_range_check_io starts for bdev %s starts\n", bdev_io->bdev->name);
+
 	spdk_poller_unregister(&ctx->poller);
 
 	/* The range is now in the locked_ranges, so no new IO can be submitted to this
@@ -9919,12 +9923,16 @@ bdev_lock_lba_range_check_io(void *_i)
 	 */
 	TAILQ_FOREACH(bdev_io, &ch->io_submitted, internal.ch_link) {
 		if (bdev_io_range_is_locked(bdev_io, range)) {
+			SPDK_INFOLOG(bdev, "bdev_lock_lba_range_check_io found that bdev %s range offset %" PRIu64 " and length %" PRIu64 " is already locked\n", bdev_io->bdev->name, range->offset, range->length);
 			ctx->poller = SPDK_POLLER_REGISTER(bdev_lock_lba_range_check_io, i, 100);
 			return SPDK_POLLER_BUSY;
 		}
 	}
 
 	spdk_bdev_for_each_channel_continue(i, 0);
+
+	SPDK_INFOLOG(bdev, "bdev_lock_lba_range_check_io starts for bdev %s done\n", bdev_io->bdev->name);
+
 	return SPDK_POLLER_BUSY;
 }
 
@@ -9935,6 +9943,9 @@ bdev_lock_lba_range_get_channel(struct spdk_bdev_channel_iter *i, struct spdk_bd
 	struct spdk_bdev_channel *ch = __io_ch_to_bdev_ch(_ch);
 	struct locked_lba_range_ctx *ctx = _ctx;
 	struct lba_range *range;
+
+
+	SPDK_INFOLOG(bdev, "bdev_lock_lba_range_get_channel starts for bdev %s in range offset %" PRIu64 ", length %" PRIu64 "\n", bdev->name, range->offset, range->length);
 
 	TAILQ_FOREACH(range, &ch->locked_ranges, tailq) {
 		if (range->length == ctx->range.length &&
@@ -9972,6 +9983,7 @@ bdev_lock_lba_range_get_channel(struct spdk_bdev_channel_iter *i, struct spdk_bd
 	}
 	TAILQ_INSERT_TAIL(&ch->locked_ranges, range, tailq);
 	bdev_lock_lba_range_check_io(i);
+	SPDK_INFOLOG(bdev, "bdev_lock_lba_range_get_channel finished for bdev %s in range offset %" PRIu64 ", length %" PRIu64 "\n", bdev->name, range->offset, range->length);
 }
 
 static void
@@ -9980,6 +9992,8 @@ bdev_lock_lba_range_ctx(struct spdk_bdev *bdev, struct locked_lba_range_ctx *ctx
 	assert(spdk_get_thread() == ctx->range.owner_thread);
 	assert(ctx->range.owner_ch == NULL ||
 	       spdk_io_channel_get_thread(ctx->range.owner_ch->channel) == ctx->range.owner_thread);
+
+	SPDK_INFOLOG(bdev, "bdev_lock_lba_range_ctx starts\n");
 
 	/* We will add a copy of this range to each channel now. */
 	spdk_bdev_for_each_channel(bdev, bdev_lock_lba_range_get_channel, ctx,
@@ -10452,6 +10466,8 @@ bdev_each_channel_msg(struct spdk_io_channel_iter *i)
 	struct spdk_bdev *bdev = io_channel_iter_get_bdev(i);
 	struct spdk_io_channel *ch = spdk_io_channel_iter_get_channel(i);
 
+	SPDK_INFOLOG(bdev, "bdev_each_channel_msg starts for bdev %s\n", bdev->name);
+
 	iter->i = i;
 	iter->fn(iter, bdev, ch, iter->ctx);
 }
@@ -10482,6 +10498,8 @@ spdk_bdev_for_each_channel(struct spdk_bdev *bdev, spdk_bdev_for_each_channel_ms
 		assert(false);
 		return;
 	}
+
+	SPDK_INFOLOG(bdev, "spdk_bdev_for_each_channel starts\n");
 
 	iter->fn = fn;
 	iter->cpl = cpl;

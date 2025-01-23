@@ -2582,6 +2582,8 @@ spdk_for_each_channel(void *io_device, spdk_channel_msg fn, void *ctx,
 		return;
 	}
 
+	SPDK_INFOLOG(thread, "spdk_for_each_channel starts\n");
+
 	i->io_device = io_device;
 	i->fn = fn;
 	i->ctx = ctx;
@@ -2611,11 +2613,13 @@ spdk_for_each_channel(void *io_device, spdk_channel_msg fn, void *ctx,
 	TAILQ_FOREACH(thread, &g_threads, tailq) {
 		ch = thread_get_io_channel(thread, i->dev);
 		if (ch != NULL) {
+			SPDK_INFOLOG(thread, "spdk_for_each_channel gots thread %" PRIu64 " for msg sending\n", thread->id);
 			ch->dev->for_each_count++;
 			i->cur_thread = thread;
 			i->ch = ch;
 			pthread_mutex_unlock(&g_devlist_mutex);
 			rc = spdk_thread_send_msg(thread, _call_channel, i);
+			SPDK_INFOLOG(thread, "spdk_for_each_channel gots thread %" PRIu64 " and sent msg\n", thread->id);
 			assert(rc == 0);
 			return;
 		}
@@ -2624,6 +2628,7 @@ spdk_for_each_channel(void *io_device, spdk_channel_msg fn, void *ctx,
 end:
 	pthread_mutex_unlock(&g_devlist_mutex);
 
+	SPDK_INFOLOG(thread, "spdk_for_each_channel gots original thread %" PRIu64 " for msg sending\n", i->orig_thread->id);
 	rc = spdk_thread_send_msg(i->orig_thread, _call_completion, i);
 	assert(rc == 0);
 }
