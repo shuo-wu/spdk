@@ -1884,9 +1884,11 @@ spdk_lvol_destroy(struct spdk_lvol *lvol, spdk_lvol_op_complete cb_fn, void *cb_
 	rc = spdk_blob_get_clones(lvs->blobstore, lvol->blob_id, &clone_id, &count);
 	if (rc == 0 && count == 1) {
 		req->clone_lvol = lvs_get_lvol_by_blob_id(lvs, clone_id);
-		if (spdk_blob_is_snapshot(req->clone_lvol->blob)) {
-			/* Snapshot's data could change, so we have to remove its checksum, if present */
-			spdk_blob_remove_xattr(req->clone_lvol->blob, LVOL_SNAPSHOT_CHECKSUM);
+		if (req->clone_lvol != NULL && req->clone_lvol->blob != NULL) {
+			if (spdk_blob_is_snapshot(req->clone_lvol->blob)) {
+				/* Snapshot's data could change, so we have to remove its checksum, if present */
+				spdk_blob_remove_xattr(req->clone_lvol->blob, LVOL_SNAPSHOT_CHECKSUM);
+			}
 		}
 	} else if (rc == -ENOMEM) {
 		SPDK_INFOLOG(lvol, "lvol %s: cannot destroy: has %" PRIu64 " clones\n",
