@@ -13,6 +13,12 @@ if [[ $os != Linux && $os != FreeBSD ]]; then
 	exit 1
 fi
 
+# /dev/fd is not found on some systems (e.g. Talos v1.9.5+)
+if [ ! -e /dev/fd ]; then
+	echo "/dev/fd not found, creating symlink to /proc/self/fd..."
+	ln -s /proc/self/fd /dev/fd
+fi
+
 rootdir=$(readlink -f $(dirname $0))/..
 source "$rootdir/scripts/common.sh"
 
