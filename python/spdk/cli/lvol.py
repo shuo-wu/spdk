@@ -214,6 +214,26 @@ def add_parser(subparsers):
     p.add_argument('operation_id', help='operation identifier', type=int)
     p.set_defaults(func=bdev_lvol_check_shallow_copy)
 
+    def bdev_lvol_register_snapshot_range_checksums(args):
+        args.client.bdev_lvol_register_snapshot_range_checksums(
+                                                             name=args.name)
+
+    p = subparsers.add_parser('bdev_lvol_register_snapshot_range_checksums', help='Compute and store snapshot\'s whole and clusters checksums')
+    p.add_argument('name', help='snapshot bdev name')
+    p.set_defaults(func=bdev_lvol_register_snapshot_range_checksums)
+
+    def bdev_lvol_get_snapshot_range_checksums(args):
+        print_json(args.client.bdev_lvol_get_snapshot_range_checksums(
+                                                            name=args.name,
+                                                            cluster_start_index=args.cluster_start_index,
+                                                            cluster_count=args.cluster_count))
+
+    p = subparsers.add_parser('bdev_lvol_get_snapshot_range_checksums', help='Get snapshot\'s clusters checksums in a specific range')
+    p.add_argument('name', help='snapshot bdev name')
+    p.add_argument('cluster_start_index', help='start index of the cluster range', type=int)
+    p.add_argument('cluster_count', help='number of clusters in the range', type=int)
+    p.set_defaults(func=bdev_lvol_get_snapshot_range_checksums)
+
     def bdev_lvol_set_parent(args):
         args.client.bdev_lvol_set_parent(
                                       lvol_name=args.lvol_name,

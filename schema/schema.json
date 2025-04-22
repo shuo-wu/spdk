@@ -5076,6 +5076,40 @@
       ]
     },
     {
+      "name": "bdev_lvol_register_snapshot_range_checksums",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "UUID or alias of the snapshot"
+        }
+      ]
+    },
+    {
+      "name": "bdev_lvol_get_snapshot_range_checksums",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "UUID or alias of the snapshot"
+        },
+        {
+          "name": "cluster_start_index",
+          "type": "number",
+          "required": true,
+          "description": "start index of the cluster range"
+        },
+        {
+          "name": "cluster_count",
+          "type": "number",
+          "required": true,
+          "description": "number of clusters in the range"
+        }
+      ]
+    },
+    {
       "name": "bdev_raid_set_options",
       "params": [
         {
