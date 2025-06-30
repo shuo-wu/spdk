@@ -1,0 +1,33 @@
+name: build
+on:
+  push:
+    branches:
+    - longhorn*
+  pull_request:
+jobs:
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout Codes
+      uses: actions/checkout@v4
+
+    - name: Install meson
+      run: |
+        sudo apt update
+        sudo apt install -y meson ninja-build python3-pyelftools
+
+    - name: Build
+      run: |
+        set -e
+        sudo git submodule update --init
+        sudo ./scripts/pkgdep.sh
+        sudo ./configure
+        sudo make -j $(nproc)
+
+    - name: Run Tests
+      run: |
+        set -e
+        sudo bash ./test/unit/unittest.sh
