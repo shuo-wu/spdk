@@ -226,6 +226,14 @@ def add_parser(subparsers):
     p.add_argument('dst_bdev_name', help='destination bdev name')
     p.set_defaults(func=bdev_lvol_start_deep_copy)
 
+    def bdev_lvol_check_deep_copy(args):
+        print_json(args.client.bdev_lvol_check_deep_copy(
+                                                        operation_id=args.operation_id))
+
+    p = subparsers.add_parser('bdev_lvol_check_deep_copy', help='Get deep copy status')
+    p.add_argument('operation_id', help='operation identifier', type=int)
+    p.set_defaults(func=bdev_lvol_check_deep_copy)
+
     def bdev_lvol_start_range_shallow_copy(args):
         print_json(args.client.bdev_lvol_start_range_shallow_copy(
                                                                 src_lvol_name=args.src_lvol_name,
