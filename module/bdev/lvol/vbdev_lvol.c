@@ -2181,8 +2181,8 @@ vbdev_lvol_esnap_dev_create(void *bs_ctx, void *blob_ctx, struct spdk_blob *blob
 	char			uuid_str[SPDK_UUID_STRING_LEN] = { 0 };
 
 	if (lvol == NULL) {
-		SPDK_ERRLOG("lvol is NULL\n");
-		return -EINVAL;
+		SPDK_NOTICELOG("Skip esnap device creation for NULL lvol\n");
+		return 0;
 	}
 
 	if (esnap_id == NULL) {
