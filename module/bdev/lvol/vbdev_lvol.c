@@ -2180,6 +2180,11 @@ vbdev_lvol_esnap_dev_create(void *bs_ctx, void *blob_ctx, struct spdk_blob *blob
 	int			rc;
 	char			uuid_str[SPDK_UUID_STRING_LEN] = { 0 };
 
+	if (lvol == NULL) {
+		SPDK_ERRLOG("lvol is NULL\n");
+		return -EINVAL;
+	}
+
 	if (esnap_id == NULL) {
 		SPDK_ERRLOG("lvol %s: NULL esnap ID\n", lvol->unique_id);
 		return -EINVAL;
