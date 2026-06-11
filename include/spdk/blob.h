@@ -922,7 +922,10 @@ int spdk_bs_blob_deep_copy(struct spdk_blob_store *bs, struct spdk_io_channel *c
  * This call set a snapshot as the parent of a blob, making the blob a clone of this snapshot.
  * The previous parent of the blob, if any, can be another snapshot or an external snapshot; if
  * the blob is not a clone, it must be thin-provisioned.
- * Blob and parent snapshot must have the same size.
+ * The blob must have at least as many clusters as the parent snapshot
+ * (child cluster count >= parent cluster count). A child with more clusters
+ * than the parent is valid; reads beyond the parent range return zeros via
+ * thin provisioning.
  *
  * \param bs blobstore.
  * \param blob_id The id of the blob.

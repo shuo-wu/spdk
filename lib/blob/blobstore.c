@@ -8311,8 +8311,9 @@ bs_set_parent_snapshot_open_cpl(void *cb_arg, struct spdk_blob *snapshot, int bs
 		return;
 	}
 
-	if (blob->active.num_clusters != snapshot->active.num_clusters) {
-		SPDK_ERRLOG("parent blob has a number of clusters different from child's ones\n");
+	if (blob->active.num_clusters < snapshot->active.num_clusters) {
+		SPDK_ERRLOG("child blob has fewer clusters (%" PRIu64 ") than parent snapshot (%" PRIu64 ")\n",
+			    blob->active.num_clusters, snapshot->active.num_clusters);
 		ctx->bserrno = -EINVAL;
 		spdk_blob_close(blob, bs_set_parent_close_snapshot, ctx);
 		return;

@@ -10393,14 +10393,14 @@ blob_set_parent(void)
 	struct spdk_blob_store *bs = g_bs;
 	struct spdk_blob_opts opts;
 	struct ut_esnap_opts esnap_opts;
-	struct spdk_blob *blob1, *blob2, *blob3, *blob4, *blob5;
-	spdk_blob_id blobid1, blobid2, blobid3, blobid4, blobid5,
+	struct spdk_blob *blob1, *blob2, *blob3, *blob4, *blob5, *blob6;
+	spdk_blob_id blobid1, blobid2, blobid3, blobid4, blobid5, blobid6,
 		     snapshotid1, snapshotid2, snapshotid3;
 	uint32_t cluster_sz, block_sz;
 	const uint32_t esnap_num_clusters = 4;
 	uint64_t esnap_num_blocks;
-	spdk_blob_id ids[2];
-	size_t clone_count = 2;
+	spdk_blob_id ids[3];
+	size_t clone_count = 3;
 
 	cluster_sz = spdk_bs_get_cluster_size(bs);
 	block_sz = spdk_bs_get_io_unit_size(bs);
@@ -10453,10 +10453,10 @@ blob_set_parent(void)
 	poll_threads();
 	CU_ASSERT(g_bserrno == -EINVAL);
 
-	/* Call set_parent with blob and snapshot of different size */
+	/* Call set_parent with blob that has more clusters than snapshot (child > parent, now succeeds) */
 	spdk_bs_blob_set_parent(bs, blobid2, snapshotid1, blob_op_complete, NULL);
 	poll_threads();
-	CU_ASSERT(g_bserrno == -EINVAL);
+	CU_ASSERT(g_bserrno == 0);
 
 	/* Call set_parent correctly with a snapshot's clone blob */
 	spdk_bs_blob_set_parent(bs, blobid1, snapshotid1, blob_op_complete, NULL);
@@ -10467,8 +10467,8 @@ blob_set_parent(void)
 	CU_ASSERT(spdk_blob_is_clone(blob1));
 	CU_ASSERT(spdk_blob_get_parent_snapshot(bs, blobid1) == snapshotid1);
 	CU_ASSERT(spdk_blob_get_clones(bs, snapshotid1, ids, &clone_count) == 0);
-	CU_ASSERT(clone_count == 2);
-	CU_ASSERT(ids[1] == blobid1);
+	CU_ASSERT(clone_count == 3);
+	CU_ASSERT(ids[2] == blobid1);
 
 	/* Create another normal blob with size equal to esnap size and make a snapshot */
 	ut_spdk_blob_opts_init(&opts);
@@ -10482,6 +10482,19 @@ blob_set_parent(void)
 	SPDK_CU_ASSERT_FATAL(g_bserrno == 0);
 	SPDK_CU_ASSERT_FATAL(g_blobid != SPDK_BLOBID_INVALID);
 	snapshotid3 = g_blobid;
+
+	/* Create a thin-provisioned blob with fewer clusters than snapshotid3 to verify child < parent fails */
+	ut_spdk_blob_opts_init(&opts);
+	opts.num_clusters = esnap_num_clusters / 2;
+	opts.thin_provision = true;
+	blob6 = ut_blob_create_and_open(bs, &opts);
+	SPDK_CU_ASSERT_FATAL(blob6 != NULL);
+	blobid6 = spdk_blob_get_id(blob6);
+
+	/* Call set_parent with child having fewer clusters than parent snapshot (should fail) */
+	spdk_bs_blob_set_parent(bs, blobid6, snapshotid3, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == -EINVAL);
 
 	/* Call set_parent correctly with an esnap's clone blob */
 	spdk_bs_blob_set_parent(bs, blobid2, snapshotid3, blob_op_complete, NULL);
@@ -10530,6 +10543,7 @@ blob_set_parent(void)
 	/* Clean up */
 	ut_blob_close_and_delete(bs, blob5);
 	ut_blob_close_and_delete(bs, blob4);
+	ut_blob_close_and_delete(bs, blob6);
 	ut_blob_close_and_delete(bs, blob3);
 	ut_blob_close_and_delete(bs, blob2);
 	ut_blob_close_and_delete(bs, blob1);
