@@ -1994,7 +1994,7 @@
         {
           "name": "tcp_connect_timeout_ms",
           "type": "uint32",
-          "description": "Time to wait until TCP connection is done. Default: 0 (no timeout)."
+          "description": "Time to wait until TCP connection is done. Default: 0 (fall back to 10s for async connects, 2s for sync connects)."
         },
         {
           "name": "enable_flush",

@@ -25,6 +25,8 @@
 #include "spdk_internal/nvme_tcp.h"
 #include "spdk_internal/trace_defs.h"
 
+#include <sys/timerfd.h>
+
 #define NVME_TCP_RW_BUFFER_SIZE 131072
 
 /* For async connect workloads, allow more time since we are more likely
@@ -85,6 +87,14 @@ struct nvme_tcp_poll_group {
 	 * registered. */
 	int interrupt_sock_fd;
 
+	/* Interrupt mode only: periodic timer that wakes the reactor to poll the
+	 * connecting qpairs, because a connecting socket produces no events.
+	 * -1 when not created. */
+	int connect_timer_fd;
+	/* True while the timer is running: while the connecting list is not
+	 * empty. Stops each new qpair from restarting the countdown. */
+	bool connect_timer_running;
+
 	TAILQ_HEAD(, nvme_tcp_qpair) needs_poll;
 	TAILQ_HEAD(, nvme_tcp_qpair) timeout_enabled;
 
@@ -144,6 +154,9 @@ struct nvme_tcp_qpair {
 	/* Error from the async socket connect callback (negative errno),
 	 * 0 while pending or on success. */
 	int					sock_connect_status;
+
+	/* Deadline for the async socket connect. */
+	uint64_t				sock_connect_timeout_tsc;
 
 	bool					shared_stats;
 
@@ -2658,6 +2671,16 @@ nvme_tcp_qpair_connect_sock(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpai
 
 	nvme_tcp_qpair_set_state(tqpair, NVME_TCP_QPAIR_STATE_SOCK_CONNECTING);
 	tqpair->sock_connect_status = 0;
+	/* Honor the configured connect timeout. Fall back to the ICReq timeout
+	 * when it is unset. */
+	if (opts.connect_timeout != 0) {
+		tqpair->sock_connect_timeout_tsc = spdk_get_ticks() +
+						   opts.connect_timeout * spdk_get_ticks_hz() / 1000;
+	} else {
+		tqpair->sock_connect_timeout_tsc = spdk_get_ticks() +
+						   (qpair->async ? ICREQ_TIMEOUT_ASYNC : ICREQ_TIMEOUT_SYNC) *
+						   spdk_get_ticks_hz();
+	}
 	tqpair->sock = spdk_sock_connect_async(ctrlr->trid.traddr, port, sock_impl_name, &opts,
 					       nvme_tcp_sock_connect_cb_fn, tqpair);
 	if (!tqpair->sock) {
@@ -2690,10 +2713,17 @@ nvme_tcp_ctrlr_connect_qpair_poll(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvm
 
 	switch (tqpair->state) {
 	case NVME_TCP_QPAIR_STATE_SOCK_CONNECTING:
-		/* Return the error recorded by the connect callback so the caller
-		 * disconnects the qpair, or -EAGAIN while the connect is still in
-		 * progress. */
-		rc = tqpair->sock_connect_status < 0 ? tqpair->sock_connect_status : -EAGAIN;
+		/* Return the error recorded by the connect callback, or -ETIMEDOUT
+		 * once the connect deadline passes, so the caller disconnects the
+		 * qpair. Return -EAGAIN while the connect is still in progress. */
+		if (tqpair->sock_connect_status < 0) {
+			rc = tqpair->sock_connect_status;
+		} else if (spdk_get_ticks() > tqpair->sock_connect_timeout_tsc) {
+			NVME_TQPAIR_ERRLOG(tqpair, "Failed to connect the socket in time\n");
+			rc = -ETIMEDOUT;
+		} else {
+			rc = -EAGAIN;
+		}
 		break;
 	case NVME_TCP_QPAIR_STATE_INITIALIZING:
 		if (spdk_get_ticks() > tqpair->icreq_timeout_tsc) {
@@ -2801,6 +2831,106 @@ nvme_tcp_poll_group_add_sock_interrupt(struct nvme_tcp_qpair *tqpair, struct spd
 	}
 
 	pgroup->interrupt_sock_fd = fd;
+
+	return 0;
+}
+
+#define CONNECT_TIMER_INTERVAL_SEC 1
+
+static void
+nvme_tcp_poll_group_disarm_connect_timer(struct nvme_tcp_poll_group *group)
+{
+	struct itimerspec ts = {};
+
+	if (group->connect_timer_fd < 0) {
+		return;
+	}
+
+	if (timerfd_settime(group->connect_timer_fd, 0, &ts, NULL) != 0) {
+		SPDK_ERRLOG("timerfd_settime() failed: %s\n", spdk_strerror(errno));
+	}
+
+	group->connect_timer_running = false;
+}
+
+/* Handles the poll group's connect timer. Runs the poll group's completion
+ * processing, which includes the connecting walk, and disarms the timer once
+ * the connecting list is empty. */
+static int
+nvme_tcp_poll_group_connect_timer_cb(void *arg)
+{
+	struct nvme_tcp_poll_group *group = arg;
+	uint64_t expirations;
+
+	if (read(group->connect_timer_fd, &expirations, sizeof(expirations)) < 0 &&
+	    errno != EAGAIN) {
+		SPDK_ERRLOG("failed to read connect timer fd: %s\n", spdk_strerror(errno));
+	}
+
+	if (TAILQ_EMPTY(&group->connecting)) {
+		nvme_tcp_poll_group_disarm_connect_timer(group);
+		/* Fall through and run one more completion pass. A qpair whose
+		 * connect failed on the previous tick may still be disconnecting,
+		 * and with no socket events this pass is the only thing that
+		 * finishes it. */
+	}
+
+	return nvme_tcp_poll_group_interrupt_cb(group->group.group);
+}
+
+/* Interrupt mode only: arm a periodic timer that wakes the reactor to poll the
+ * connecting qpairs, because a connecting socket produces no events. Creates
+ * and registers the timerfd on first use. */
+static int
+nvme_tcp_poll_group_arm_connect_timer(struct nvme_tcp_qpair *tqpair)
+{
+	struct nvme_tcp_poll_group *group = nvme_tcp_poll_group(tqpair->qpair.poll_group);
+	struct spdk_event_handler_opts opts = {};
+	struct spdk_fd_group *fgrp;
+	struct itimerspec ts = {
+		.it_interval.tv_sec = CONNECT_TIMER_INTERVAL_SEC,
+		.it_value.tv_sec = CONNECT_TIMER_INTERVAL_SEC,
+	};
+	int fd, rc;
+
+	/* A running timer must not be restarted: timerfd_settime() resets the
+	 * countdown, so restarting it for every new qpair could push the next
+	 * tick out forever. */
+	if (group->connect_timer_running) {
+		return 0;
+	}
+
+	if (group->connect_timer_fd < 0) {
+		fgrp = spdk_nvme_poll_group_get_fd_group(tqpair->qpair.poll_group->group);
+		if (fgrp == NULL) {
+			return 0;
+		}
+
+		fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+		if (fd < 0) {
+			NVME_TQPAIR_ERRLOG(tqpair, "timerfd_create() failed: %s\n", spdk_strerror(errno));
+			return -errno;
+		}
+
+		spdk_fd_group_get_default_event_handler_opts(&opts, sizeof(opts));
+
+		rc = SPDK_FD_GROUP_ADD_EXT(fgrp, fd, nvme_tcp_poll_group_connect_timer_cb, group, &opts);
+		if (rc != 0) {
+			NVME_TQPAIR_ERRLOG(tqpair, "failed to add connect timer fd, rc %d: %s\n", rc,
+					   spdk_strerror(-rc));
+			close(fd);
+			return rc;
+		}
+
+		group->connect_timer_fd = fd;
+	}
+
+	if (timerfd_settime(group->connect_timer_fd, 0, &ts, NULL) != 0) {
+		NVME_TQPAIR_ERRLOG(tqpair, "timerfd_settime() failed: %s\n", spdk_strerror(errno));
+		return -errno;
+	}
+
+	group->connect_timer_running = true;
 
 	return 0;
 }
@@ -2929,6 +3059,14 @@ nvme_tcp_ctrlr_connect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpa
 		 * connecting walk in process_completions or by the disconnect paths. */
 		if (!TAILQ_ENTRY_ENQUEUED(tqpair, link_connecting)) {
 			TAILQ_INSERT_TAIL(&tgroup->connecting, tqpair, link_connecting);
+		}
+
+		/* In interrupt mode, a timer drives the connecting walk. */
+		if (tqpair->interrupt_efd >= 0) {
+			rc = nvme_tcp_poll_group_arm_connect_timer(tqpair);
+			if (rc < 0) {
+				return rc;
+			}
 		}
 	} else {
 		/* When resetting a controller, we disconnect adminq and then reconnect. The stats
@@ -3245,6 +3383,7 @@ nvme_tcp_poll_group_create(void)
 	TAILQ_INIT(&group->connecting);
 
 	group->interrupt_sock_fd = -1;
+	group->connect_timer_fd = -1;
 
 	group->sock_group = spdk_sock_group_create(group);
 	if (group->sock_group == NULL) {
@@ -3365,6 +3504,16 @@ nvme_tcp_poll_group_destroy(struct spdk_nvme_transport_poll_group *tgroup)
 			spdk_fd_group_remove(fgrp, group->interrupt_sock_fd);
 		}
 		group->interrupt_sock_fd = -1;
+	}
+
+	if (group->connect_timer_fd >= 0) {
+		struct spdk_fd_group *fgrp = spdk_nvme_poll_group_get_fd_group(tgroup->group);
+
+		if (fgrp != NULL) {
+			spdk_fd_group_remove(fgrp, group->connect_timer_fd);
+		}
+		close(group->connect_timer_fd);
+		group->connect_timer_fd = -1;
 	}
 
 	rc = spdk_sock_group_close(&group->sock_group);

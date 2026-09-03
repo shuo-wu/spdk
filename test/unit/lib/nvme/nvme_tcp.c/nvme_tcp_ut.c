@@ -1164,6 +1164,26 @@ test_nvme_tcp_qpair_connect_sock(void)
 	rc = nvme_tcp_qpair_connect_sock(ctrlr, &tqpair.qpair);
 	CU_ASSERT(rc == 0);
 
+	/* The connect deadline uses the configured timeout when set. */
+	MOCK_SET(spdk_get_ticks, 100);
+	MOCK_SET(spdk_get_ticks_hz, 1000);
+	g_spdk_nvme_transport_opts.tcp_connect_timeout_ms = 3000;
+
+	rc = nvme_tcp_qpair_connect_sock(ctrlr, &tqpair.qpair);
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(tqpair.sock_connect_timeout_tsc == 100 + 3000);
+
+	/* The connect deadline falls back to the ICReq timeout when unset. */
+	g_spdk_nvme_transport_opts.tcp_connect_timeout_ms = 0;
+	tqpair.qpair.async = true;
+
+	rc = nvme_tcp_qpair_connect_sock(ctrlr, &tqpair.qpair);
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(tqpair.sock_connect_timeout_tsc == 100 + ICREQ_TIMEOUT_ASYNC * 1000);
+
+	MOCK_CLEAR(spdk_get_ticks);
+	MOCK_CLEAR(spdk_get_ticks_hz);
+
 	/* Unsupported family of the transport address */
 	ctrlr->trid.adrfam = SPDK_NVMF_ADRFAM_IB;
 
@@ -1761,6 +1781,7 @@ test_nvme_tcp_poll_group_connecting(void)
 	MOCK_SET(spdk_get_ticks, 2);
 	tqpair[1].state = NVME_TCP_QPAIR_STATE_RUNNING;
 	tqpair[2].state = NVME_TCP_QPAIR_STATE_SOCK_CONNECTING;
+	tqpair[2].sock_connect_timeout_tsc = 10;
 
 	nvme_tcp_poll_group_process_completions(&tgroup.group, 0,
 						ut_disconnect_qpair_poll_group_cb);
@@ -1816,6 +1837,14 @@ test_nvme_tcp_sock_connect_fail(void)
 	tqpair.state = NVME_TCP_QPAIR_STATE_INITIALIZING;
 	nvme_tcp_sock_connect_cb_fn(&tqpair, -EBADF);
 	CU_ASSERT_EQUAL(tqpair.sock_connect_status, 0);
+
+	/* The poll times out once the connect deadline passes. */
+	tqpair.state = NVME_TCP_QPAIR_STATE_SOCK_CONNECTING;
+	tqpair.sock_connect_timeout_tsc = 1;
+	MOCK_SET(spdk_get_ticks, 2);
+	rc = nvme_tcp_ctrlr_connect_qpair_poll(&ctrlr, &tqpair.qpair);
+	CU_ASSERT_EQUAL(rc, -ETIMEDOUT);
+	MOCK_CLEAR(spdk_get_ticks);
 }
 
 static void

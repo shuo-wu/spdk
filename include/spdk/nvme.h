@@ -4915,7 +4915,8 @@ struct spdk_nvme_transport_opts {
 	uint8_t reserved23;
 
 	/**
-	 * Time in msec to wait until connection is done (0 = no timeout).
+	 * Time in msec to wait until connection is done
+	 * (0 = fall back to 10s for async connects, 2s for sync connects).
 	 */
 	uint32_t tcp_connect_timeout_ms;
 };
