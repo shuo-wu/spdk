@@ -1724,6 +1724,69 @@ test_nvme_tcp_ctrlr_disconnect_qpair(void)
 }
 
 static void
+test_nvme_tcp_poll_group_connecting(void)
+{
+	struct spdk_nvme_ctrlr ctrlr = {};
+	struct nvme_tcp_pdu recv_pdu[3] = {};
+	struct nvme_tcp_qpair tqpair[3] = {};
+	struct spdk_nvme_poll_group group = {};
+	struct nvme_tcp_poll_group tgroup = { .group.group = &group };
+	int i;
+
+	tgroup.sock_group = spdk_sock_group_create(&tgroup);
+	SPDK_CU_ASSERT_FATAL(tgroup.sock_group != NULL);
+	TAILQ_INIT(&tgroup.needs_poll);
+	TAILQ_INIT(&tgroup.timeout_enabled);
+	TAILQ_INIT(&tgroup.connecting);
+	STAILQ_INIT(&tgroup.group.disconnected_qpairs);
+
+	for (i = 0; i < 3; i++) {
+		tqpair[i].qpair.trtype = SPDK_NVME_TRANSPORT_TCP;
+		tqpair[i].qpair.ctrlr = &ctrlr;
+		tqpair[i].qpair.async = true;
+		tqpair[i].qpair.poll_group = &tgroup.group;
+		tqpair[i].qpair.state = NVME_QPAIR_CONNECTING;
+		tqpair[i].recv_pdu = &recv_pdu[i];
+		tqpair[i].shared_stats = true;
+		tqpair[i].interrupt_efd = -1;
+		TAILQ_INIT(&tqpair[i].send_queue);
+		TAILQ_INIT(&tqpair[i].free_reqs);
+		TAILQ_INIT(&tqpair[i].outstanding_reqs);
+		TAILQ_INSERT_TAIL(&tgroup.connecting, &tqpair[i], link_connecting);
+	}
+
+	/* [0]: icreq timed out. [1]: connected. [2]: still connecting. */
+	tqpair[0].state = NVME_TCP_QPAIR_STATE_INITIALIZING;
+	tqpair[0].icreq_timeout_tsc = 1;
+	MOCK_SET(spdk_get_ticks, 2);
+	tqpair[1].state = NVME_TCP_QPAIR_STATE_RUNNING;
+	tqpair[2].state = NVME_TCP_QPAIR_STATE_SOCK_CONNECTING;
+
+	nvme_tcp_poll_group_process_completions(&tgroup.group, 0,
+						ut_disconnect_qpair_poll_group_cb);
+	MOCK_CLEAR(spdk_get_ticks);
+
+	/* [0] failed but stays on the list because nvme_ctrlr_disconnect_qpair()
+	 * is stubbed. The disconnect paths are verified below. */
+	CU_ASSERT(TAILQ_ENTRY_ENQUEUED(&tqpair[0], link_connecting));
+	CU_ASSERT_EQUAL(tqpair[0].qpair.transport_failure_reason, SPDK_NVME_QPAIR_FAILURE_UNKNOWN);
+	CU_ASSERT(TAILQ_ENTRY_NOT_ENQUEUED(&tqpair[1], link_connecting));
+	CU_ASSERT(TAILQ_ENTRY_ENQUEUED(&tqpair[2], link_connecting));
+	CU_ASSERT_EQUAL(tqpair[2].qpair.transport_failure_reason, SPDK_NVME_QPAIR_FAILURE_NONE);
+
+	/* Both disconnect paths remove the qpair from the list. */
+	nvme_tcp_ctrlr_disconnect_qpair(&ctrlr, &tqpair[2].qpair);
+	CU_ASSERT(TAILQ_ENTRY_NOT_ENQUEUED(&tqpair[2], link_connecting));
+
+	tqpair[0].qpair.state = NVME_QPAIR_DISCONNECTING;
+	nvme_tcp_ctrlr_disconnect_qpair_done(&tqpair[0].qpair);
+	CU_ASSERT(TAILQ_ENTRY_NOT_ENQUEUED(&tqpair[0], link_connecting));
+	CU_ASSERT(TAILQ_EMPTY(&tgroup.connecting));
+
+	spdk_sock_group_close(&tgroup.sock_group);
+}
+
+static void
 test_nvme_tcp_ctrlr_create_io_qpair(void)
 {
 	struct spdk_nvme_qpair *qpair = NULL;
@@ -2212,6 +2275,7 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, test_nvme_tcp_capsule_resp_hdr_handle);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_connect_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_disconnect_qpair);
+	CU_ADD_TEST(suite, test_nvme_tcp_poll_group_connecting);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_create_io_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_delete_io_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_poll_group_get_stats);

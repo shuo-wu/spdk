@@ -87,6 +87,11 @@ struct nvme_tcp_poll_group {
 
 	TAILQ_HEAD(, nvme_tcp_qpair) needs_poll;
 	TAILQ_HEAD(, nvme_tcp_qpair) timeout_enabled;
+
+	/* Qpairs that are not connected yet. A connecting socket produces no
+	 * sock group events, so these qpairs are polled from this list until
+	 * the connection completes or fails. */
+	TAILQ_HEAD(, nvme_tcp_qpair) connecting;
 	struct spdk_nvme_tcp_stat stats;
 };
 
@@ -131,6 +136,8 @@ struct nvme_tcp_qpair {
 	TAILQ_ENTRY(nvme_tcp_qpair)		link_poll;
 
 	TAILQ_ENTRY(nvme_tcp_qpair)		link_timeout;
+
+	TAILQ_ENTRY(nvme_tcp_qpair)		link_connecting;
 
 	uint64_t				icreq_timeout_tsc;
 
@@ -430,6 +437,9 @@ nvme_tcp_ctrlr_disconnect_qpair_done(struct spdk_nvme_qpair *qpair)
 		if (TAILQ_ENTRY_ENQUEUED(tqpair, link_timeout)) {
 			TAILQ_REMOVE_CLEAR(&group->timeout_enabled, tqpair, link_timeout);
 		}
+		if (TAILQ_ENTRY_ENQUEUED(tqpair, link_connecting)) {
+			TAILQ_REMOVE_CLEAR(&group->connecting, tqpair, link_connecting);
+		}
 	}
 
 	nvme_transport_ctrlr_disconnect_qpair_done(qpair);
@@ -464,6 +474,10 @@ nvme_tcp_ctrlr_disconnect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_
 
 		if (TAILQ_ENTRY_ENQUEUED(tqpair, link_poll)) {
 			TAILQ_REMOVE_CLEAR(&group->needs_poll, tqpair, link_poll);
+		}
+
+		if (TAILQ_ENTRY_ENQUEUED(tqpair, link_connecting)) {
+			TAILQ_REMOVE_CLEAR(&group->connecting, tqpair, link_connecting);
 		}
 
 		if (group->sock_group && tqpair->sock) {
@@ -2882,6 +2896,12 @@ nvme_tcp_ctrlr_connect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpa
 					   spdk_strerror(-rc));
 			return rc;
 		}
+
+		/* Track the qpair until its connection is established. Removed by the
+		 * connecting walk in process_completions or by the disconnect paths. */
+		if (!TAILQ_ENTRY_ENQUEUED(tqpair, link_connecting)) {
+			TAILQ_INSERT_TAIL(&tgroup->connecting, tqpair, link_connecting);
+		}
 	} else {
 		/* When resetting a controller, we disconnect adminq and then reconnect. The stats
 		 * is not freed when disconnecting. So when reconnecting, don't allocate memory
@@ -3194,6 +3214,7 @@ nvme_tcp_poll_group_create(void)
 
 	TAILQ_INIT(&group->needs_poll);
 	TAILQ_INIT(&group->timeout_enabled);
+	TAILQ_INIT(&group->connecting);
 
 	group->interrupt_sock_fd = -1;
 
@@ -3205,6 +3226,34 @@ nvme_tcp_poll_group_create(void)
 	}
 
 	return &group->group;
+}
+
+/* Poll connecting qpairs so connect progress and failures are handled
+ * (longhorn/longhorn#13869). */
+static void
+nvme_tcp_poll_group_process_connecting(struct nvme_tcp_poll_group *group)
+{
+	struct nvme_tcp_qpair *tqpair, *tmp_tqpair;
+	struct spdk_nvme_qpair *qpair;
+	int rc;
+
+	/* Use the safe iterator because entries may be removed from the list
+	 * during the loop. */
+	TAILQ_FOREACH_SAFE(tqpair, &group->connecting, link_connecting, tmp_tqpair) {
+		qpair = &tqpair->qpair;
+
+		rc = nvme_tcp_ctrlr_connect_qpair_poll(qpair->ctrlr, qpair);
+		if (rc == 0) {
+			TAILQ_REMOVE_CLEAR(&group->connecting, tqpair, link_connecting);
+			/* Once the connection is completed, we can submit queued requests */
+			nvme_qpair_resubmit_requests(qpair, tqpair->num_entries);
+		} else if (rc != -EAGAIN) {
+			NVME_TQPAIR_ERRLOG(tqpair, "Failed to connect, rc %d: %s\n", rc,
+					   spdk_strerror(-rc));
+			qpair->transport_failure_reason = SPDK_NVME_QPAIR_FAILURE_UNKNOWN;
+			nvme_ctrlr_disconnect_qpair(qpair);
+		}
+	}
 }
 
 static int64_t
@@ -3243,6 +3292,8 @@ nvme_tcp_poll_group_process_completions(struct spdk_nvme_transport_poll_group *t
 		assert(qpair->ctrlr->timeout_enabled);
 		nvme_tcp_qpair_check_timeout(qpair);
 	}
+
+	nvme_tcp_poll_group_process_connecting(group);
 
 	if (spdk_unlikely(rc < 0)) {
 		SPDK_ERRLOG("spdk_sock_group_poll() failed, rc %d: %s\n", rc, spdk_strerror(-rc));
