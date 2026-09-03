@@ -1847,6 +1847,51 @@ test_nvme_tcp_sock_connect_fail(void)
 	MOCK_CLEAR(spdk_get_ticks);
 }
 
+/* A qpair stuck in SOCK_CONNECTING produces no socket events, so poll group
+ * processing alone must fail it once the connect deadline passes
+ * (longhorn/longhorn#13869). */
+static void
+test_nvme_tcp_connect_stall_fails_qpair(void)
+{
+	struct spdk_nvme_ctrlr ctrlr = {};
+	struct nvme_tcp_pdu recv_pdu = {};
+	struct nvme_tcp_qpair tqpair = {};
+	struct spdk_nvme_poll_group group = {};
+	struct nvme_tcp_poll_group tgroup = { .group.group = &group };
+
+	tgroup.sock_group = spdk_sock_group_create(&tgroup);
+	SPDK_CU_ASSERT_FATAL(tgroup.sock_group != NULL);
+	TAILQ_INIT(&tgroup.needs_poll);
+	TAILQ_INIT(&tgroup.timeout_enabled);
+	TAILQ_INIT(&tgroup.connecting);
+	STAILQ_INIT(&tgroup.group.disconnected_qpairs);
+
+	tqpair.qpair.trtype = SPDK_NVME_TRANSPORT_TCP;
+	tqpair.qpair.ctrlr = &ctrlr;
+	tqpair.qpair.async = true;
+	tqpair.qpair.poll_group = &tgroup.group;
+	tqpair.qpair.state = NVME_QPAIR_CONNECTING;
+	tqpair.state = NVME_TCP_QPAIR_STATE_SOCK_CONNECTING;
+	tqpair.recv_pdu = &recv_pdu;
+	tqpair.shared_stats = true;
+	tqpair.interrupt_efd = -1;
+	TAILQ_INIT(&tqpair.send_queue);
+	TAILQ_INIT(&tqpair.free_reqs);
+	TAILQ_INIT(&tqpair.outstanding_reqs);
+	TAILQ_INSERT_TAIL(&tgroup.connecting, &tqpair, link_connecting);
+
+	tqpair.sock_connect_timeout_tsc = 1;
+	MOCK_SET(spdk_get_ticks, 2);
+
+	nvme_tcp_poll_group_process_completions(&tgroup.group, 0,
+						ut_disconnect_qpair_poll_group_cb);
+	MOCK_CLEAR(spdk_get_ticks);
+
+	CU_ASSERT_EQUAL(tqpair.qpair.transport_failure_reason, SPDK_NVME_QPAIR_FAILURE_UNKNOWN);
+
+	spdk_sock_group_close(&tgroup.sock_group);
+}
+
 static void
 test_nvme_tcp_ctrlr_create_io_qpair(void)
 {
@@ -2338,6 +2383,7 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_disconnect_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_poll_group_connecting);
 	CU_ADD_TEST(suite, test_nvme_tcp_sock_connect_fail);
+	CU_ADD_TEST(suite, test_nvme_tcp_connect_stall_fails_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_create_io_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_delete_io_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_poll_group_get_stats);
