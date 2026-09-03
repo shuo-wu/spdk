@@ -756,6 +756,29 @@ test_nvme_get_sgl_print_info(void)
 			   NVME_CMD_DPTR_STR_SIZE));
 }
 
+/* The state names are parsed by Longhorn (longhorn/longhorn#13869), so they must
+ * not change. */
+static void
+test_nvme_qpair_get_state_string(void)
+{
+	struct spdk_nvme_qpair qpair = {};
+
+	qpair.state = NVME_QPAIR_DISCONNECTED;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "DISCONNECTED") == 0);
+	qpair.state = NVME_QPAIR_DISCONNECTING;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "DISCONNECTING") == 0);
+	qpair.state = NVME_QPAIR_CONNECTING;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "CONNECTING") == 0);
+	qpair.state = NVME_QPAIR_CONNECTED;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "CONNECTED") == 0);
+	qpair.state = NVME_QPAIR_ENABLING;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "ENABLING") == 0);
+	qpair.state = NVME_QPAIR_ENABLED;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "ENABLED") == 0);
+	qpair.state = NVME_QPAIR_DESTROYING;
+	CU_ASSERT(strcmp(spdk_nvme_qpair_get_state_string(&qpair), "DESTROYING") == 0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -780,6 +803,7 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, test_nvme_qpair_manual_complete_request);
 	CU_ADD_TEST(suite, test_nvme_qpair_init_deinit);
 	CU_ADD_TEST(suite, test_nvme_get_sgl_print_info);
+	CU_ADD_TEST(suite, test_nvme_qpair_get_state_string);
 
 	num_failures = spdk_ut_run_tests(argc, argv, NULL);
 	CU_cleanup_registry();

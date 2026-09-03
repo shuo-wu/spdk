@@ -2262,6 +2262,15 @@ void spdk_nvme_qpair_set_abort_dnr(struct spdk_nvme_qpair *qpair, bool dnr);
  */
 bool spdk_nvme_qpair_is_connected(struct spdk_nvme_qpair *qpair);
 
+/**
+ * Return the name of the qpair state.
+ *
+ * \param qpair The qpair to check.
+ *
+ * \return the state name, or "UNKNOWN" for an unrecognized state.
+ */
+const char *spdk_nvme_qpair_get_state_string(struct spdk_nvme_qpair *qpair);
+
 typedef void (*spdk_nvme_authenticate_cb)(void *ctx, int status);
 
 /**

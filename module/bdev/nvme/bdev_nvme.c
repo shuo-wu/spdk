@@ -9895,6 +9895,9 @@ nvme_io_path_info_json(struct spdk_json_write_ctx *w, struct nvme_io_path *io_pa
 	spdk_json_write_named_uint32(w, "cntlid", cdata->cntlid);
 	spdk_json_write_named_bool(w, "current", nvme_io_path_is_current(io_path));
 	spdk_json_write_named_bool(w, "connected", nvme_qpair_is_connected(io_path->qpair));
+	spdk_json_write_named_string(w, "qpair_state", io_path->qpair->qpair != NULL ?
+				     spdk_nvme_qpair_get_state_string(io_path->qpair->qpair) :
+				     "DISCONNECTED");
 	spdk_json_write_named_bool(w, "accessible", nvme_ns_is_accessible(nvme_ns));
 
 	spdk_json_write_named_object_begin(w, "transport");

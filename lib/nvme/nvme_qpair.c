@@ -1001,6 +1001,12 @@ spdk_nvme_qpair_is_connected(struct spdk_nvme_qpair *qpair)
 	       nvme_qpair_get_state(qpair) <= NVME_QPAIR_ENABLED;
 }
 
+const char *
+spdk_nvme_qpair_get_state_string(struct spdk_nvme_qpair *qpair)
+{
+	return nvme_qpair_state_string(nvme_qpair_get_state(qpair));
+}
+
 int
 nvme_qpair_init(struct spdk_nvme_qpair *qpair, uint16_t id,
 		struct spdk_nvme_ctrlr *ctrlr,

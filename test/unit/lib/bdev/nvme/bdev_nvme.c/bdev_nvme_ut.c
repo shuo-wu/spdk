@@ -1255,6 +1255,12 @@ spdk_nvme_qpair_is_connected(struct spdk_nvme_qpair *qpair)
 	return qpair->is_connected;
 }
 
+const char *
+spdk_nvme_qpair_get_state_string(struct spdk_nvme_qpair *qpair)
+{
+	return qpair->is_connected ? "ENABLED" : "DISCONNECTED";
+}
+
 int32_t
 spdk_nvme_qpair_process_completions(struct spdk_nvme_qpair *qpair,
 				    uint32_t max_completions)
