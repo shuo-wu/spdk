@@ -141,6 +141,10 @@ struct nvme_tcp_qpair {
 
 	uint64_t				icreq_timeout_tsc;
 
+	/* Error from the async socket connect callback (negative errno),
+	 * 0 while pending or on success. */
+	int					sock_connect_status;
+
 	bool					shared_stats;
 
 	/* Full interrupt mode: eventfd registered in the poll group's fd_group.
@@ -2536,6 +2540,25 @@ nvme_tcp_qpair_icreq_send(struct nvme_tcp_qpair *tqpair)
 	tqpair->icreq_timeout_tsc = spdk_get_ticks() + (timeout_in_sec * spdk_get_ticks_hz());
 }
 
+/* Record a connect failure so the connect poll returns it. Do nothing unless
+ * a connect is in progress: the callback also fires when the socket is closed
+ * during a disconnect. */
+static void
+nvme_tcp_qpair_sock_connect_fail(struct nvme_tcp_qpair *tqpair, int status)
+{
+	if (tqpair->state != NVME_TCP_QPAIR_STATE_SOCK_CONNECTING ||
+	    nvme_qpair_get_state(&tqpair->qpair) != NVME_QPAIR_CONNECTING) {
+		return;
+	}
+
+	tqpair->sock_connect_status = status;
+	/* In interrupt mode, wake the reactor because a failed socket produces no
+	 * epoll events. The eventfd is ready by now: this callback runs from
+	 * reactor polling, which only starts after nvme_tcp_ctrlr_connect_qpair()
+	 * has registered it. */
+	nvme_tcp_qpair_signal_tx(tqpair);
+}
+
 static void
 nvme_tcp_sock_connect_cb_fn(void *cb_arg, int status)
 {
@@ -2543,6 +2566,7 @@ nvme_tcp_sock_connect_cb_fn(void *cb_arg, int status)
 
 	if (status < 0) {
 		NVME_TQPAIR_ERRLOG(tqpair, "sock connection error %d (%s)\n", status, spdk_strerror(abs(status)));
+		nvme_tcp_qpair_sock_connect_fail(tqpair, status);
 		return;
 	}
 
@@ -2633,6 +2657,7 @@ nvme_tcp_qpair_connect_sock(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpai
 	}
 
 	nvme_tcp_qpair_set_state(tqpair, NVME_TCP_QPAIR_STATE_SOCK_CONNECTING);
+	tqpair->sock_connect_status = 0;
 	tqpair->sock = spdk_sock_connect_async(ctrlr->trid.traddr, port, sock_impl_name, &opts,
 					       nvme_tcp_sock_connect_cb_fn, tqpair);
 	if (!tqpair->sock) {
@@ -2665,7 +2690,10 @@ nvme_tcp_ctrlr_connect_qpair_poll(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvm
 
 	switch (tqpair->state) {
 	case NVME_TCP_QPAIR_STATE_SOCK_CONNECTING:
-		rc = -EAGAIN;
+		/* Return the error recorded by the connect callback so the caller
+		 * disconnects the qpair, or -EAGAIN while the connect is still in
+		 * progress. */
+		rc = tqpair->sock_connect_status < 0 ? tqpair->sock_connect_status : -EAGAIN;
 		break;
 	case NVME_TCP_QPAIR_STATE_INITIALIZING:
 		if (spdk_get_ticks() > tqpair->icreq_timeout_tsc) {

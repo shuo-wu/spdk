@@ -1787,6 +1787,38 @@ test_nvme_tcp_poll_group_connecting(void)
 }
 
 static void
+test_nvme_tcp_sock_connect_fail(void)
+{
+	struct spdk_nvme_ctrlr ctrlr = {};
+	struct nvme_tcp_qpair tqpair = {};
+	int rc;
+
+	tqpair.qpair.trtype = SPDK_NVME_TRANSPORT_TCP;
+	tqpair.qpair.ctrlr = &ctrlr;
+	tqpair.qpair.state = NVME_QPAIR_CONNECTING;
+	tqpair.state = NVME_TCP_QPAIR_STATE_SOCK_CONNECTING;
+	tqpair.interrupt_efd = -1;
+
+	/* The callback records a connect failure and the poll returns it. */
+	nvme_tcp_sock_connect_cb_fn(&tqpair, -ECONNREFUSED);
+	CU_ASSERT_EQUAL(tqpair.sock_connect_status, -ECONNREFUSED);
+	rc = nvme_tcp_ctrlr_connect_qpair_poll(&ctrlr, &tqpair.qpair);
+	CU_ASSERT_EQUAL(rc, -ECONNREFUSED);
+
+	/* The callback from the socket close during a disconnect is ignored. */
+	tqpair.sock_connect_status = 0;
+	tqpair.qpair.state = NVME_QPAIR_DISCONNECTING;
+	nvme_tcp_sock_connect_cb_fn(&tqpair, -EBADF);
+	CU_ASSERT_EQUAL(tqpair.sock_connect_status, 0);
+
+	/* The callback after the connect completed is ignored. */
+	tqpair.qpair.state = NVME_QPAIR_CONNECTING;
+	tqpair.state = NVME_TCP_QPAIR_STATE_INITIALIZING;
+	nvme_tcp_sock_connect_cb_fn(&tqpair, -EBADF);
+	CU_ASSERT_EQUAL(tqpair.sock_connect_status, 0);
+}
+
+static void
 test_nvme_tcp_ctrlr_create_io_qpair(void)
 {
 	struct spdk_nvme_qpair *qpair = NULL;
@@ -2276,6 +2308,7 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_connect_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_disconnect_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_poll_group_connecting);
+	CU_ADD_TEST(suite, test_nvme_tcp_sock_connect_fail);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_create_io_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_ctrlr_delete_io_qpair);
 	CU_ADD_TEST(suite, test_nvme_tcp_poll_group_get_stats);
