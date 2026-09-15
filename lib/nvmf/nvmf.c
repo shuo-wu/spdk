@@ -1136,10 +1136,18 @@ _nvmf_tgt_remove_transport(struct spdk_io_channel_iter *i)
 	spdk_for_each_channel_continue(i, 0);
 }
 
+static int nvmf_tgt_check_transport(struct spdk_nvmf_tgt *tgt,
+				    struct spdk_nvmf_transport *transport);
+
 static void
 _nvmf_tgt_add_transport_done(struct spdk_io_channel_iter *i, int status)
 {
 	struct spdk_nvmf_tgt_add_transport_ctx *ctx = spdk_io_channel_iter_get_ctx(i);
+
+	/* Channel iteration yields to other target configuration operations. */
+	if (status == 0) {
+		status = nvmf_tgt_check_transport(ctx->tgt, ctx->transport);
+	}
 
 	if (status) {
 		ctx->status = status;
@@ -1172,6 +1180,16 @@ SPDK_LOG_DEPRECATION_REGISTER(nvmf_tgt_mixed_dif_insert_or_strip,
 			      "all transports must share dif_insert_or_strip value",
 			      "v26.09", SPDK_LOG_DEPRECATION_ALWAYS);
 
+static int
+nvmf_tgt_check_transport(struct spdk_nvmf_tgt *tgt, struct spdk_nvmf_transport *transport)
+{
+	if (spdk_nvmf_tgt_get_transport(tgt, transport->ops->name)) {
+		return -EEXIST;
+	}
+
+	return 0;
+}
+
 void
 spdk_nvmf_tgt_add_transport(struct spdk_nvmf_tgt *tgt,
 			    struct spdk_nvmf_transport *transport,
@@ -1180,12 +1198,14 @@ spdk_nvmf_tgt_add_transport(struct spdk_nvmf_tgt *tgt,
 {
 	struct spdk_nvmf_tgt_add_transport_ctx *ctx;
 	struct spdk_nvmf_transport *existing;
+	int rc;
 
 	SPDK_DTRACE_PROBE2_TICKS(nvmf_tgt_add_transport, transport, tgt->name);
 
-	if (spdk_nvmf_tgt_get_transport(tgt, transport->ops->name)) {
-		cb_fn(cb_arg, -EEXIST);
-		return; /* transport already created */
+	rc = nvmf_tgt_check_transport(tgt, transport);
+	if (rc != 0) {
+		cb_fn(cb_arg, rc);
+		return;
 	}
 
 	existing = TAILQ_FIRST(&tgt->transports);
