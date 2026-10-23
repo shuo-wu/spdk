@@ -2955,10 +2955,14 @@ blob_insert_cluster_cpl(void *cb_arg, int bserrno)
 	struct spdk_blob_copy_cluster_ctx *ctx = cb_arg;
 
 	if (bserrno) {
-		if (bserrno == -EEXIST) {
+		if (bserrno == -EEXIST || bserrno == -EAGAIN) {
 			/* The metadata insert failed because another thread
-			 * allocated the cluster first. Clear and free our cluster
-			 * but continue without error. */
+			 * allocated the cluster first, or the extent table changed
+			 * after the cluster was allocated. Clear and free our cluster
+			 * but continue without error, so the I/O is retried.
+			 * -EAGAIN is only returned by blob_insert_cluster_msg() for
+			 * the latter; other failures (e.g. -ENOMEM, -EIO) are reverted
+			 * and reported below. */
 			blob_insert_cluster_clear(ctx);
 			return;
 		}
@@ -10137,6 +10141,19 @@ blob_insert_cluster_msg(void *arg)
 	struct spdk_blob_cluster_op_ctx *ctx = arg;
 	uint32_t *extent_page;
 	int rc;
+
+	if (ctx->blob->use_extent_table && ctx->extent_page == 0 &&
+	    *bs_cluster_to_extent_page(ctx->blob, ctx->cluster_num) == 0) {
+		/* The extent page was present when the cluster was allocated on the
+		 * original thread, so no md page was claimed there. It has since been
+		 * cleared, e.g. a snapshot took over the extent table of this blob while
+		 * the cluster allocation was in flight. Leave the metadata untouched and
+		 * let the original thread release the cluster and retry the I/O.
+		 * blob_insert_cluster_cpl() treats -EAGAIN as this retry request, so
+		 * do not return -EAGAIN from this function for any other reason. */
+		blob_op_cluster_msg_cb(ctx, -EAGAIN);
+		return;
+	}
 
 	rc = blob_insert_cluster(ctx->blob, ctx->cluster_num, ctx->cluster);
 	if (rc != 0) {
