@@ -9372,8 +9372,10 @@ static void
 delete_snapshot_update_extent_pages(void *cb_arg, int bserrno)
 {
 	struct delete_snapshot_ctx *ctx = cb_arg;
+	struct spdk_blob_store *bs = ctx->clone->bs;
 	uint32_t *extent_page;
-	uint64_t i;
+	uint32_t write_page;
+	uint64_t i, slot_start;
 
 	for (i = ctx->next_extent_page; i < ctx->snapshot->active.num_extent_pages &&
 	     i < ctx->clone->active.num_extent_pages; i++) {
@@ -9383,17 +9385,52 @@ delete_snapshot_update_extent_pages(void *cb_arg, int bserrno)
 		}
 
 		extent_page = &ctx->clone->active.extent_pages[i];
-		if (*extent_page == 0) {
-			/* Copy extent page from snapshot when clone did not have a matching one */
-			*extent_page = ctx->snapshot->active.extent_pages[i];
-			continue;
+		if (*extent_page != 0) {
+			/* The clone already has an extent page for this slot. Rewriting it in
+			 * place is enough: it is serialized from the clone's cluster map, which
+			 * already holds the mix of the clone's and the snapshot's clusters, with
+			 * the entry count of the clone. */
+			write_page = *extent_page;
+		} else {
+			/* The clone has no extent page for this slot. If it covers the same
+			 * number of clusters here as the snapshot, the snapshot's page is valid
+			 * for the clone too, so adopt it verbatim. */
+			slot_start = i * SPDK_EXTENTS_PER_EP;
+			if (spdk_min(ctx->snapshot->active.num_clusters - slot_start, SPDK_EXTENTS_PER_EP) ==
+			    spdk_min(ctx->clone->active.num_clusters - slot_start, SPDK_EXTENTS_PER_EP)) {
+				*extent_page = ctx->snapshot->active.extent_pages[i];
+				continue;
+			}
+
+			/* The clone covers a different number of clusters in this slot. For
+			 * example, this is the snapshot's last slot, which maps fewer than
+			 * SPDK_EXTENTS_PER_EP clusters, while the clone was expanded so this
+			 * slot is no longer its last one and must map all SPDK_EXTENTS_PER_EP.
+			 * Reusing the snapshot's page would give the clone the wrong entry count
+			 * and make a later blobstore load fail. Give the clone a freshly
+			 * allocated extent page instead. Leave the snapshot's page untouched:
+			 * the snapshot keeps using it until the deletion completes, and it is
+			 * released with the snapshot.
+			 *
+			 * Start the search at page 1: metadata page 0 doubles as the extent
+			 * table's "no page" sentinel, so (as in bs_allocate_cluster()) it must
+			 * not back an extent page, or the slot would still read as unallocated
+			 * after a reload. */
+			spdk_spin_lock(&bs->used_lock);
+			write_page = spdk_bit_array_find_first_clear(bs->used_md_pages, 1);
+			if (write_page == UINT32_MAX) {
+				spdk_spin_unlock(&bs->used_lock);
+				ctx->bserrno = -ENOMEM;
+				delete_snapshot_cleanup_clone(ctx, 0);
+				return;
+			}
+			bs_claim_md_page(bs, write_page);
+			spdk_spin_unlock(&bs->used_lock);
+			*extent_page = write_page;
 		}
 
-		/* Clone and snapshot both contain partially filled matching extent pages.
-		 * Update the clone extent page in place with cluster map containing the mix of both. */
 		ctx->next_extent_page = i + 1;
-
-		blob_write_extent_page(ctx->clone, *extent_page, i * SPDK_EXTENTS_PER_EP, ctx->page,
+		blob_write_extent_page(ctx->clone, write_page, i * SPDK_EXTENTS_PER_EP, ctx->page,
 				       delete_snapshot_update_extent_pages, ctx);
 		return;
 	}

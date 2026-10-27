@@ -10224,6 +10224,164 @@ blob_clone_resize(void)
 	spdk_bs_free_io_channel(channel);
 }
 
+static void
+blob_delete_snapshot_resized_clone(void)
+{
+	/* Regression test: deleting a snapshot whose clone was resized larger after
+	 * the snapshot was taken used to leave the clone with a short (partially
+	 * filled) extent page in a non-last extent slot. A full extent slot is
+	 * expected everywhere except the last one, so the next blobstore load failed
+	 * in blob_load_cpl_extents_cpl().
+	 *
+	 * Geometry (4 KiB clusters, 512 clusters per extent page):
+	 *   snapshot = 600 clusters -> slot 0 full (512), slot 1 partial (88)
+	 *   clone resized to 2048 clusters -> slot 1 becomes a middle slot that must
+	 *   hold 512 entries. */
+	struct spdk_blob_store *bs;
+	struct spdk_bs_dev *dev;
+	struct spdk_bs_opts bs_opts;
+	struct spdk_blob_opts blob_opts;
+	struct spdk_blob *blob, *clone;
+	spdk_blob_id blobid, snapid;
+	struct spdk_io_channel *channel;
+	uint64_t pages_per_cluster;
+	uint32_t saved_phys_blocklen = g_phys_blocklen;
+	uint8_t payload_write[DEV_BUFFER_BLOCKLEN];
+	uint8_t payload_read[DEV_BUFFER_BLOCKLEN];
+	/* Cluster 550 lives in the partially filled slot 1 (clusters 512..1023). */
+	const uint64_t probe_cluster = 550;
+	const uint64_t snap_clusters = 600;
+	const uint64_t clone_clusters = 2048;
+
+	/* Pin a 4 KiB physical block (hence 4 KiB md pages and clusters) so this test
+	 * is deterministic regardless of the g_phys_blocklen the suite is iterating,
+	 * and so >1024 clusters fit in the 64 MiB test device. One extent page always
+	 * maps SPDK_EXTENTS_PER_EP (512) clusters, independent of the cluster size. */
+	g_phys_blocklen = 4096;
+	dev = init_dev();
+	spdk_bs_opts_init(&bs_opts, sizeof(bs_opts));
+	bs_opts.cluster_sz = 4096;
+	bs_opts.num_md_pages = 256;
+	spdk_bs_init(dev, &bs_opts, bs_op_with_handle_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	SPDK_CU_ASSERT_FATAL(g_bs != NULL);
+	bs = g_bs;
+
+	pages_per_cluster = spdk_bs_get_cluster_size(bs) / spdk_bs_get_page_size(bs);
+
+	channel = spdk_bs_alloc_io_channel(bs);
+	SPDK_CU_ASSERT_FATAL(channel != NULL);
+
+	/* Thick provision so every extent page is populated. */
+	ut_spdk_blob_opts_init(&blob_opts);
+	blob_opts.num_clusters = snap_clusters;
+	blob_opts.thin_provision = false;
+	blob_opts.use_extent_table = true;
+	blob = ut_blob_create_and_open(bs, &blob_opts);
+	blobid = spdk_blob_get_id(blob);
+	CU_ASSERT(spdk_blob_get_num_clusters(blob) == snap_clusters);
+
+	/* Write a known pattern into the partially filled slot. */
+	memset(payload_write, 0xA5, sizeof(payload_write));
+	g_bserrno = -1;
+	spdk_blob_io_write(blob, channel, payload_write, probe_cluster * pages_per_cluster, 1,
+			   blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+
+	/* Snapshot: the original blob becomes a thin clone of the snapshot, which now
+	 * owns the 600 clusters and their two extent pages. */
+	spdk_bs_create_snapshot(bs, blobid, NULL, blob_op_with_id_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	SPDK_CU_ASSERT_FATAL(g_blobid != SPDK_BLOBID_INVALID);
+	snapid = g_blobid;
+	g_blobid = SPDK_BLOBID_INVALID;
+	clone = blob;
+
+	/* Grow the clone so slot 1 is no longer its last slot. */
+	g_bserrno = -1;
+	spdk_blob_resize(clone, clone_clusters, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(spdk_blob_get_num_clusters(clone) == clone_clusters);
+	g_bserrno = -1;
+	spdk_blob_sync_md(clone, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+
+	/* Delete the snapshot: the clone adopts the snapshot's extent pages. */
+	spdk_bs_delete_blob(bs, snapid, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+
+	/* Close the clone and the channel so the blobstore can be reloaded. */
+	spdk_blob_close(clone, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	spdk_bs_free_io_channel(channel);
+	poll_threads();
+
+	/* Dirty load (blobstore recovery path, as in the reported crash): the clone
+	 * must load without aborting. */
+	ut_bs_dirty_load(&bs, &bs_opts);
+
+	spdk_bs_open_blob(bs, blobid, blob_op_with_handle_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	SPDK_CU_ASSERT_FATAL(g_blob != NULL);
+	clone = g_blob;
+	CU_ASSERT(spdk_blob_get_num_clusters(clone) == clone_clusters);
+
+	/* The data in the partially filled slot must still be readable. */
+	channel = spdk_bs_alloc_io_channel(bs);
+	SPDK_CU_ASSERT_FATAL(channel != NULL);
+	memset(payload_read, 0, sizeof(payload_read));
+	g_bserrno = -1;
+	spdk_blob_io_read(clone, channel, payload_read, probe_cluster * pages_per_cluster, 1,
+			  blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(memcmp(payload_write, payload_read, sizeof(payload_read)) == 0);
+
+	spdk_blob_close(clone, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	spdk_bs_free_io_channel(channel);
+	poll_threads();
+
+	/* Clean load path must also succeed. */
+	ut_bs_reload(&bs, &bs_opts);
+
+	spdk_bs_open_blob(bs, blobid, blob_op_with_handle_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	SPDK_CU_ASSERT_FATAL(g_blob != NULL);
+	clone = g_blob;
+	CU_ASSERT(spdk_blob_get_num_clusters(clone) == clone_clusters);
+
+	channel = spdk_bs_alloc_io_channel(bs);
+	SPDK_CU_ASSERT_FATAL(channel != NULL);
+	memset(payload_read, 0, sizeof(payload_read));
+	g_bserrno = -1;
+	spdk_blob_io_read(clone, channel, payload_read, probe_cluster * pages_per_cluster, 1,
+			  blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(memcmp(payload_write, payload_read, sizeof(payload_read)) == 0);
+
+	ut_blob_close_and_delete(bs, clone);
+	spdk_bs_free_io_channel(channel);
+	poll_threads();
+
+	spdk_bs_unload(bs, bs_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	g_bs = NULL;
+
+	g_phys_blocklen = saved_phys_blocklen;
+}
 
 static void
 blob_esnap_clone_resize(void)
@@ -11752,6 +11910,7 @@ main(int argc, char **argv)
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_hotplug);
 		CU_ADD_TEST(suite_blob, blob_is_degraded);
 		CU_ADD_TEST(suite_bs, blob_clone_resize);
+		CU_ADD_TEST(suite, blob_delete_snapshot_resized_clone);
 		CU_ADD_TEST(suite, blob_esnap_clone_resize);
 		CU_ADD_TEST(suite_bs, blob_shallow_copy);
 		CU_ADD_TEST(suite_bs, blob_deep_copy);
