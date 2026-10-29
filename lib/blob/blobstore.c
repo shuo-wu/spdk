@@ -1961,6 +1961,7 @@ struct spdk_blob_persist_ctx {
 	spdk_bs_sequence_t		*seq;
 	spdk_bs_sequence_cpl		cb_fn;
 	void				*cb_arg;
+	int				bserrno;
 	TAILQ_ENTRY(spdk_blob_persist_ctx) link;
 };
 
@@ -2025,11 +2026,23 @@ bs_super_validate(struct spdk_bs_super_block *super, struct spdk_blob_store *bs)
 
 static void bs_mark_dirty(spdk_bs_sequence_t *seq, struct spdk_blob_store *bs,
 			  spdk_bs_sequence_cpl cb_fn, void *cb_arg);
+static void blob_close_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno);
 
 static void
 blob_persist_complete_cb(void *arg)
 {
 	struct spdk_blob_persist_ctx *ctx = arg;
+
+	/* Record a failed persist in the caller's sequence, as bs_sequence_finish() records an
+	 * error, without clearing an error the sequence already holds; the callback itself still
+	 * gets 0. Not for a close: it releases the blob even when persisting fails, e.g. so that
+	 * spdk_bs_unload() can free the blobstore of a hot-removed device, while callers such as
+	 * the lvol library take a failed close for one that kept the blob open. A close keeps
+	 * reporting only the errors of its own I/O: code that needs a blob's metadata persisted
+	 * syncs it before closing the blob. */
+	if (ctx->bserrno != 0 && ctx->cb_fn != blob_close_cpl) {
+		ctx->seq->bserrno = ctx->bserrno;
+	}
 
 	/* Call user callback */
 	ctx->cb_fn(ctx->seq, ctx->cb_arg, 0);
@@ -2056,6 +2069,7 @@ blob_persist_complete(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ctx *ctx
 	/* Complete all persists that were pending when the current persist started */
 	TAILQ_FOREACH_SAFE(next_persist, &blob->persists_to_complete, link, tmp) {
 		TAILQ_REMOVE(&blob->persists_to_complete, next_persist, link);
+		next_persist->bserrno = bserrno;
 		spdk_thread_send_msg(spdk_get_thread(), blob_persist_complete_cb, next_persist);
 	}
 
